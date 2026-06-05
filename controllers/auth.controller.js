@@ -3,6 +3,8 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { User } from "../models/user.model.js";
 import { Company } from "../models/company.model.js";
+import { College } from "../models/college.model.js";
+import { Admin } from "../models/admin.model.js";
 import { AllowedStudent } from "../models/AllowedStudent.model.js";
 import { Student } from "../models/student.model.js";
 import jwt from "jsonwebtoken"
@@ -10,6 +12,11 @@ import jwt from "jsonwebtoken"
 const generateAccessAndRefreshTokens= async(userId)=>{
   try{
        const user= await User.findById(userId)
+       
+       if (!user) {
+        throw new ApiError(404, "User not found");
+      }
+
        const accessToken=user.generateAccessToken();
        const refreshToken=user.generateRefreshToken();
        user.refreshToken=refreshToken
