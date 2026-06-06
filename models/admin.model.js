@@ -6,6 +6,7 @@ const adminSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      unique: true
     },
     college: {
       type: Schema.Types.ObjectId,
