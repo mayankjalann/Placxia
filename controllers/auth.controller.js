@@ -137,7 +137,7 @@ const loginUser= asyncHandler(async (req,res)=>{
     if(!email || !password){
         throw new ApiError(400,"Email and password required");
     }
-
+    console.log("Looking for email:", email)
     const user=await User.findOne({email});
 
     if(!user){
