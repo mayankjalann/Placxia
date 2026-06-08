@@ -3,7 +3,10 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import authRouter from "../routes/auth.routes.js"
 import jobRouter from "../routes/job.routes.js"
+import offerRouter from "../routes/offer.routes.js"
+
 import applicationRouter from "../routes/application.routes.js"
+
 
 const app=express();
 
@@ -26,5 +29,6 @@ app.use(cookieParser());
 app.use("/api/v1/auth",authRouter);
 app.use("/api/v1/job",jobRouter);
 app.use("/api/v1/application",applicationRouter)
+app.use("/api/v1/offer",offerRouter);
 
 export default app;
