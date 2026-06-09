@@ -36,7 +36,7 @@ verifyJWT,
 verifyRole("ADMIN","STUDENT"),
 getAllOpenJobs);
 
-router.patch("/getJobById/:jobId",
+router.get("/getJobById/:jobId",
 verifyJWT,
 verifyRole("ADMIN","STUDENT"),
 getJobById);
