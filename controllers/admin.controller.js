@@ -37,9 +37,10 @@ const getUnapprovedCompanies = asyncHandler(async (req, res) => {
         throw new ApiError(404, "Admin profile not found");
     }
     
-    // Fetch companies that have NOT been approved by this admin's college
+    // Fetch companies that requested THIS college but haven't been approved yet
     const companies = await Company.find({ 
-        approvedColleges: { $ne: admin.college } 
+        requestedColleges: { $in: [admin.college] },
+        approvedColleges: { $nin: [admin.college] } 
     }).sort({ createdAt: 1 });
 
     return res.status(200).json(

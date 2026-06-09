@@ -90,10 +90,10 @@ const registerStudent=asyncHandler(async(req,res)=>{
 
 const registerCompany = asyncHandler(async (req, res) => {
 
-    const { email, password, name, industry, website, description } = req.body
+    const { email, password, name, industry, website, description, requestedColleges } = req.body
   
-    if (!email || !password || !name || !industry) {
-      throw new ApiError(400, "Email, password, name and industry are required")
+    if (!email || !password || !name || !industry || !requestedColleges) {
+      throw new ApiError(400, "Email, password, name, industry, and requestedColleges are required")
     }
   
     const existingUser = await User.findOne({ email })
@@ -115,7 +115,7 @@ const registerCompany = asyncHandler(async (req, res) => {
       industry,
       website,
       description,
-      isApproved: false,
+      requestedColleges,
     })
   
     const createdUser = await User.findById(user._id).select("-password -refreshToken")

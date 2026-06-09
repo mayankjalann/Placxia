@@ -38,6 +38,12 @@ const companySchema = new Schema(
         ref: "College"
       }
     ],
+    requestedColleges: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "College"
+      }
+    ],
     contactPerson: {
       type: String,
       trim: true,
