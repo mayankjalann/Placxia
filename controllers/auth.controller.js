@@ -8,7 +8,7 @@ import { Admin } from "../models/admin.model.js";
 import { AllowedStudent } from "../models/AllowedStudent.model.js";
 import { Student } from "../models/student.model.js";
 import jwt from "jsonwebtoken"
-import { id } from "zod/v4/locales";
+import { uploadOnCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
 
 const generateAccessAndRefreshTokens= async(userId)=>{
   try{
@@ -247,6 +247,22 @@ const updateStudentProfile = asyncHandler(async (req, res) => {
       throw new ApiError(404, "Student profile not found");
   }
 
+  // Handle Resume Upload
+  if (req.file) {
+      const uploadResult = await uploadOnCloudinary(req.file.path);
+      if (!uploadResult) {
+          throw new ApiError(500, "Failed to upload resume to Cloudinary");
+      }
+      
+      // Delete old resume if it exists
+      if (student.resumePublicId) {
+          await deleteFromCloudinary(student.resumePublicId);
+      }
+      
+      student.resumeUrl = uploadResult.url;
+      student.resumePublicId = uploadResult.public_id;
+  }
+
   const allowedFields = [
       "name",
       "phone",
@@ -281,6 +297,22 @@ const updateCompanyProfile = asyncHandler(async (req, res) => {
 
   if (!company) {
       throw new ApiError(404, "Company profile not found");
+  }
+
+  // Handle Logo Upload
+  if (req.file) {
+      const uploadResult = await uploadOnCloudinary(req.file.path);
+      if (!uploadResult) {
+          throw new ApiError(500, "Failed to upload logo to Cloudinary");
+      }
+      
+      // Delete old logo if it exists
+      if (company.logoPublicId) {
+          await deleteFromCloudinary(company.logoPublicId);
+      }
+      
+      company.logoUrl = uploadResult.url;
+      company.logoPublicId = uploadResult.public_id;
   }
 
   const allowedFields = [

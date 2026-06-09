@@ -5,6 +5,7 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { User } from "../models/user.model.js";
 import { Student } from "../models/student.model.js";
+
 const createJob=asyncHandler(async (req,res)=>{
     const company= await Company.findOne({user: req.user._id});
 
