@@ -32,19 +32,12 @@ const companySchema = new Schema(
     logoPublicId: { //used to delete the old logo if company updates new warna cloudianry exhausts
       type: String,
     },
-    isApproved: {
-      type: Boolean,
-      default: false,
-    },
-    approvedBy: {
-      type: Schema.Types.ObjectId,
-      ref: "Admin",
-      default: null,
-    },
-    approvedAt: {
-      type: Date,
-      default: null,
-    },
+    approvedColleges: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "College"
+      }
+    ],
     contactPerson: {
       type: String,
       trim: true,

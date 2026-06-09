@@ -4,6 +4,7 @@ import cors from "cors";
 import authRouter from "../routes/auth.routes.js"
 import jobRouter from "../routes/job.routes.js"
 import offerRouter from "../routes/offer.routes.js"
+import adminRouter from "../routes/admin.routes.js"
 
 import applicationRouter from "../routes/application.routes.js"
 
@@ -30,5 +31,6 @@ app.use("/api/v1/auth",authRouter);
 app.use("/api/v1/job",jobRouter);
 app.use("/api/v1/application",applicationRouter)
 app.use("/api/v1/offer",offerRouter);
+app.use("/api/v1/admin",adminRouter)
 
 export default app;

@@ -4,16 +4,12 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { User } from "../models/user.model.js";
-
+import { Student } from "../models/student.model.js";
 const createJob=asyncHandler(async (req,res)=>{
     const company= await Company.findOne({user: req.user._id});
 
     if(!company){
         throw new ApiError(404,"Company profile not found");
-    }
-
-    if(!company.isApproved){
-        throw new ApiError(403,"Company not approved by admin yet");
     }
 
     const {
@@ -37,6 +33,16 @@ const createJob=asyncHandler(async (req,res)=>{
       // 4. Basic validation
       if (!title || !description || !positionsAvailable || !jobType || !deadline) {
         throw new ApiError(400, "Missing required job fields");
+      }
+
+      // 5. Check if company is approved by ALL requested colleges
+      if (eligibleColleges && eligibleColleges.length > 0) {
+        const unapproved = eligibleColleges.filter(
+            id => !company.approvedColleges.includes(id)
+        );
+        if (unapproved.length > 0) {
+            throw new ApiError(403, "You can only post jobs to colleges that have approved your company.");
+        }
       }
 
       const job = await Job.create({
@@ -223,7 +229,17 @@ const getCompanyJobs = asyncHandler(async (req, res) => {
 });
 
 const getAllOpenJobs= asyncHandler(async(req,res)=>{
-    const openJobs= await Job.find({status: "OPEN"})
+    // Find the logged-in student to get their college
+    const student = await Student.findOne({ user: req.user._id });
+    if (!student) {
+        throw new ApiError(404, "Student profile not found");
+    }
+
+    // Only fetch jobs that are OPEN and meant for this student's college!
+    const openJobs = await Job.find({ 
+        status: "OPEN",
+        eligibleColleges: { $in: [student.college] } 
+    })
     .populate("company","name industry logoUrl")
     .sort({createdAt: -1}); //descending order
 
