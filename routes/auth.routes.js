@@ -9,12 +9,14 @@ import {
     updateCompanyProfile,
     updateAdminProfile,
     getCurrentUser,
-    refreshAccessToken
+    refreshAccessToken,
+    getAllColleges
 } from "../controllers/auth.controller.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
 import { upload } from "../middlewares/multer.middleware.js";
 const router=Router();
 
+router.get("/colleges", getAllColleges);
 router.post("/register/student",registerStudent);
 router.post("/login",loginUser);
 router.post("/register/company",registerCompany);

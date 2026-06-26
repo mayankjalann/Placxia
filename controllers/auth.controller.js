@@ -7,6 +7,7 @@ import { College } from "../models/college.model.js";
 import { Admin } from "../models/admin.model.js";
 import { AllowedStudent } from "../models/AllowedStudent.model.js";
 import { Student } from "../models/student.model.js";
+import { College } from "../models/college.model.js";
 import jwt from "jsonwebtoken"
 import { uploadOnCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
 
@@ -433,13 +434,23 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
       );
 });
 
-export {registerStudent, 
-  registerCompany, 
-  loginUser, 
-  logoutUser,
-changePassword,
-updateStudentProfile,
-updateCompanyProfile,
-updateAdminProfile,
-getCurrentUser,
-refreshAccessToken};
+const getAllColleges = asyncHandler(async (req, res) => {
+  const colleges = await College.find({}).select("name _id");
+  return res.status(200).json(
+      new ApiResponse(200, colleges, "Colleges fetched successfully")
+  );
+});
+
+export {
+    registerStudent,
+    registerCompany,
+    loginUser,
+    logoutUser,
+    changePassword,
+    updateStudentProfile,
+    updateCompanyProfile,
+    updateAdminProfile,
+    getCurrentUser,
+    refreshAccessToken,
+    getAllColleges
+};
