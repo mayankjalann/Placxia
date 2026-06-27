@@ -7,7 +7,6 @@ import { College } from "../models/college.model.js";
 import { Admin } from "../models/admin.model.js";
 import { AllowedStudent } from "../models/AllowedStudent.model.js";
 import { Student } from "../models/student.model.js";
-import { College } from "../models/college.model.js";
 import jwt from "jsonwebtoken"
 import { uploadOnCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
 
@@ -157,9 +156,22 @@ const loginUser= asyncHandler(async (req,res)=>{
 
     const {accessToken,refreshToken}=await generateAccessAndRefreshTokens(user._id);
 
-     const loggedInUser= await User.findById(user._id).select("-password -refreshToken")
-     // kyunki purana reference h humare paas toh dikkat h usme refresh token nai h
-     //aur cookies mein hume password bhi nai bhejna
+     let loggedInUser = await User.findById(user._id).select("-password -refreshToken").lean();
+     
+     // CHEAT CODE: Manually "populate" the profile based on the role so Redux has their name!
+     if (loggedInUser.role === "STUDENT") {
+         const student = await Student.findOne({ user: user._id }).lean();
+         loggedInUser.studentProfile = student;
+         loggedInUser.name = student.name; // Attach name directly for easy access
+     } else if (loggedInUser.role === "COMPANY") {
+         const company = await Company.findOne({ user: user._id }).lean();
+         loggedInUser.companyProfile = company;
+         loggedInUser.name = company.name;
+     } else if (loggedInUser.role === "ADMIN") {
+         const admin = await Admin.findOne({ user: user._id }).lean();
+         loggedInUser.adminProfile = admin;
+         loggedInUser.name = admin.name;
+     }
 
      const options={
           httpOnly: true,
@@ -372,8 +384,22 @@ const updateAdminProfile = asyncHandler(async (req, res) => {
 
 const getCurrentUser = asyncHandler(async (req, res) => {
 
-  const user = await User.findById(req.user._id)
-      .select("-password -refreshToken");
+  let user = await User.findById(req.user._id)
+      .select("-password -refreshToken").lean();
+
+  if (user.role === "STUDENT") {
+      const student = await Student.findOne({ user: user._id }).lean();
+      user.studentProfile = student;
+      user.name = student.name;
+  } else if (user.role === "COMPANY") {
+      const company = await Company.findOne({ user: user._id }).lean();
+      user.companyProfile = company;
+      user.name = company.name;
+  } else if (user.role === "ADMIN") {
+      const admin = await Admin.findOne({ user: user._id }).lean();
+      user.adminProfile = admin;
+      user.name = admin.name;
+  }
 
   return res.status(200).json(
       new ApiResponse(200, user, "User fetched successfully")
