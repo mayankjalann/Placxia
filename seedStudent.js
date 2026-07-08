@@ -1,6 +1,6 @@
 import "dotenv/config";
 import mongoose from "mongoose";
-import { AllowedStudent } from "./models/AllowedStudent.model.js";
+import { AllowedStudent } from "./models/allowedStudent.model.js";
 import { College } from "./models/college.model.js";
 
 const seedStudent = async () => {

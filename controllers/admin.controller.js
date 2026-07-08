@@ -3,7 +3,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { Admin } from "../models/admin.model.js";
-import { AllowedStudent } from "../models/AllowedStudent.model.js";
+import { AllowedStudent } from "../models/allowedStudent.model.js";
 
 const approveCompany = asyncHandler(async (req, res) => {
     const { companyId } = req.params;

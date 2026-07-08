@@ -1,5 +1,5 @@
 import {Router} from "express"
-import { applyForJob, getJobApplicants, updateApplicationStatus } from "../controllers/application.controller.js";
+import { applyForJob, getJobApplicants, updateApplicationStatus, getMyApplications } from "../controllers/application.controller.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
 import { verifyRole } from "../middlewares/role.middleware.js";
 
@@ -9,6 +9,11 @@ router.post("/applyForJob/:jobId",
 verifyJWT,
 verifyRole("STUDENT"),
 applyForJob)
+
+router.get("/getMyApplications",
+verifyJWT,
+verifyRole("STUDENT"),
+getMyApplications)
 
 router.get("/getJobApplicants/:jobId",
 verifyJWT,

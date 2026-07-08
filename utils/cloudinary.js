@@ -1,35 +1,33 @@
-import {v2 as cloudinary} from "cloudinary"
-import fs from "fs"
-// Configuration
-cloudinary.config({ 
-    cloud_name:process.env.CLOUDINARY_CLOUD_NAME, 
-    api_key:process.env.CLOUDIANRY_API_KEY, 
-    api_secret: process.env.CLOUDINARY_API_SECRET // Click 'API Keys' above to copy your API secret
-}); 
+import { v2 as cloudinary } from "cloudinary";
+import fs from "fs";
 
-const uploadOnCloudinary=async (localFilePath)=>{
-    try{
-        if(!localFilePath) return null;
-         //upload the file
-        const response = await cloudinary.uploader.upload(localFilePath,{
-            resource_type:"auto" 
-        })
-        //file has been uploaded succesfull
-        //console.log("file is uploaded on cloudinary ",response.url);
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME?.trim(),
+    api_key: process.env.CLOUDINARY_API_KEY?.trim(),   // ✅ fixed typo
+    api_secret: process.env.CLOUDINARY_API_SECRET?.trim()
+});
+
+const uploadOnCloudinary = async (localFilePath, resourceType = "auto") => {
+    try {
+        if (!localFilePath) return null;
+        const response = await cloudinary.uploader.upload(localFilePath, {
+            resource_type: resourceType
+        });
         fs.unlinkSync(localFilePath);
         return response;
-    }
-    catch(error){
-        fs.unlinkSync(localFilePath); //remove the locally saved temporary file as the upload oprration got failed
+    } catch (error) {
+        console.error("CLOUDINARY UPLOAD ERROR:", error);
+        fs.unlinkSync(localFilePath);
         return null;
     }
-}
+};
 
-const deleteFromCloudinary = async (publicId) => {
+const deleteFromCloudinary = async (publicId, resourceType = "raw") => { // ✅ added resourceType
     try {
         if (!publicId) return null;
-        // Delete the file using the public ID
-        const response = await cloudinary.uploader.destroy(publicId);
+        const response = await cloudinary.uploader.destroy(publicId, {
+            resource_type: resourceType  // ✅ required for non-image deletions
+        });
         return response;
     } catch (error) {
         console.error("Error deleting from Cloudinary:", error);
@@ -37,6 +35,18 @@ const deleteFromCloudinary = async (publicId) => {
     }
 };
 
-export { uploadOnCloudinary, deleteFromCloudinary };
+const getSignedCloudinaryUrl = (publicId, resourceType = "raw", format = "pdf") => { // ✅ fixed default
+    try {
+        return cloudinary.url(publicId, {
+            sign_url: true,
+            resource_type: resourceType,
+            format: format,
+            secure: true
+        });
+    } catch (error) {
+        console.error("Error signing URL:", error);
+        return null;
+    }
+};
 
-
+export { uploadOnCloudinary, deleteFromCloudinary, getSignedCloudinaryUrl };

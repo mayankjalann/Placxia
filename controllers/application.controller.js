@@ -116,8 +116,23 @@ const updateApplicationStatus = asyncHandler(async (req, res) => {
     );
 });
 
-export {applyForJob,
-getJobApplicants,
-updateApplicationStatus
+const getMyApplications = asyncHandler(async (req, res) => {
+    const student = await Student.findOne({ user: req.user._id });
+    if (!student) {
+        throw new ApiError(404, "Student profile not found");
+    }
+
+    const applications = await Application.find({ student: student._id }).select("job status");
+    
+    return res.status(200).json(
+        new ApiResponse(200, applications, "My applications fetched successfully")
+    );
+});
+
+export {
+    applyForJob,
+    getJobApplicants,
+    updateApplicationStatus,
+    getMyApplications
 }
 
