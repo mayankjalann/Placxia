@@ -5,10 +5,10 @@ import { User } from "../models/user.model.js";
 import { Company } from "../models/company.model.js";
 import { College } from "../models/college.model.js";
 import { Admin } from "../models/admin.model.js";
-import { AllowedStudent } from "../models/AllowedStudent.model.js";
+import { AllowedStudent } from "../models/allowedStudent.model.js";
 import { Student } from "../models/student.model.js";
 import jwt from "jsonwebtoken"
-import { uploadOnCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
+import { uploadOnCloudinary, deleteFromCloudinary, getSignedCloudinaryUrl } from "../utils/cloudinary.js";
 
 const generateAccessAndRefreshTokens= async(userId)=>{
   try{
@@ -260,20 +260,15 @@ const updateStudentProfile = asyncHandler(async (req, res) => {
       throw new ApiError(404, "Student profile not found");
   }
 
-  // Handle Resume Upload
+  // Handle Resume Upload (Bypassing Cloudinary due to PDF corruption on free tier)
   if (req.file) {
-      const uploadResult = await uploadOnCloudinary(req.file.path);
-      if (!uploadResult) {
-          throw new ApiError(500, "Failed to upload resume to Cloudinary");
-      }
+      // Instead of Cloudinary, we will just use the local file path that Multer already saved!
+      // The file is saved at: public/temp/filename.pdf
+      // We will generate a local URL so the frontend can access it directly from our Express server.
+      const localUrl = `http://localhost:8000/temp/${req.file.filename}`;
       
-      // Delete old resume if it exists
-      if (student.resumePublicId) {
-          await deleteFromCloudinary(student.resumePublicId);
-      }
-      
-      student.resumeUrl = uploadResult.url;
-      student.resumePublicId = uploadResult.public_id;
+      student.resumeUrl = localUrl;
+      student.resumePublicId = "local"; // No public ID needed for local files
   }
 
   const allowedFields = [
