@@ -175,7 +175,8 @@ const loginUser= asyncHandler(async (req,res)=>{
 
      const options={
           httpOnly: true,
-          secure: true
+          secure: true,
+          sameSite: 'none'
      } //ensures cookies non modifiable by frontend
 
      return res
@@ -207,7 +208,8 @@ const logoutUser=asyncHandler(async (req,res)=>{
 // 2. clear cookies
 const options = {
     httpOnly: true,
-    secure: true
+    secure: true,
+    sameSite: 'none'
 };
 
 return res
@@ -439,7 +441,8 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
 
   const options = {
       httpOnly: true,
-      secure: true
+      secure: true,
+      sameSite: 'none'
   };
 
   return res
