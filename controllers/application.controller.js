@@ -122,7 +122,16 @@ const getMyApplications = asyncHandler(async (req, res) => {
         throw new ApiError(404, "Student profile not found");
     }
 
-    const applications = await Application.find({ student: student._id }).select("job status");
+    const applications = await Application.find({ student: student._id })
+        .populate({
+            path: "job",
+            populate: {
+                path: "company",
+                select: "name companyProfile"
+            }
+        })
+        .select("job status createdAt")
+        .sort({ createdAt: -1 });
     
     return res.status(200).json(
         new ApiResponse(200, applications, "My applications fetched successfully")
