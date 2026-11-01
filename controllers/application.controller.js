@@ -26,6 +26,15 @@ const applyForJob=asyncHandler(async (req,res)=>{
         throw new ApiError(400, "This job is not accepting applications right now");
     }
 
+    // Security Check: Does this job allow applications from this student's college?
+    const isEligibleCollege = job.eligibleColleges.some(
+        collegeId => collegeId.toString() === student.college.toString()
+    );
+
+    if (!isEligibleCollege) {
+        throw new ApiError(403, "You are not authorized to apply for this job. It is not open to your college.");
+    }
+
     const existingApplication= await Application.findOne({
         student: student._id,
         job: job._id

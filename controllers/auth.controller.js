@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
@@ -52,38 +53,50 @@ const registerStudent=asyncHandler(async(req,res)=>{
         throw new ApiError(409, "User already exists with this email")
     }
 
-    const user=await User.create({
-        email,
-        password,
-        role: "STUDENT",
-        college: allowedStudent.college,
-        isVerified: true
-    });
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-    const student = await Student.create({
-        user: user._id,
-        college: allowedStudent.college,
-        rollNo: allowedStudent.rollNo,
-        branch: allowedStudent.branch,
-        batch: allowedStudent.batch,
-        name: email.split("@")[0], // temp name from email
-      });
-      
-      // also mark as registered
-      allowedStudent.isRegistered = true
-      await allowedStudent.save()
+    try {
+        const user=await User.create([{
+            email,
+            password,
+            role: "STUDENT",
+            college: allowedStudent.college,
+            isVerified: true
+        }], { session });
 
-      const createdUser= await User.findById(user._id).select("-password -refreshToken")
+        const student = await Student.create([{
+            user: user[0]._id,
+            college: allowedStudent.college,
+            rollNo: allowedStudent.rollNo,
+            branch: allowedStudent.branch,
+            batch: allowedStudent.batch,
+            name: email.split("@")[0], // temp name from email
+        }], { session });
+          
+        // also mark as registered
+        allowedStudent.isRegistered = true
+        await allowedStudent.save({ session })
 
-      return res
-      .status(201)
-      .json(
-        new ApiResponse(
-          201,
-          { user: createdUser, student },
-          "Student registered successfully"
+        await session.commitTransaction();
+        session.endSession();
+
+        const createdUser= await User.findById(user[0]._id).select("-password -refreshToken")
+
+        return res
+        .status(201)
+        .json(
+            new ApiResponse(
+            201,
+            { user: createdUser, student: student[0] },
+            "Student registered successfully"
+            )
         )
-      )
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        throw new ApiError(500, "Registration failed during transaction: " + error.message);
+    }
 
 
 })
@@ -101,34 +114,46 @@ const registerCompany = asyncHandler(async (req, res) => {
       throw new ApiError(409, "Company already registered with this email")
     }
   
-    const user = await User.create({
-      email,
-      password,
-      role: "COMPANY",
-      college: null,
-      isVerified: true,
-    })
-  
-    const company = await Company.create({
-      user: user._id,
-      name,
-      industry,
-      website,
-      description,
-      requestedColleges,
-    })
-  
-    const createdUser = await User.findById(user._id).select("-password -refreshToken")
-  
-    return res
-      .status(201)
-      .json(
-        new ApiResponse(
-          201,
-          { user: createdUser, company },
-          "Company registered successfully. Wait for admin approval."
-        )
-      )
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        const user = await User.create([{
+            email,
+            password,
+            role: "COMPANY",
+            college: null,
+            isVerified: true,
+        }], { session })
+      
+        const company = await Company.create([{
+            user: user[0]._id,
+            name,
+            industry,
+            website,
+            description,
+            requestedColleges,
+        }], { session })
+      
+        await session.commitTransaction();
+        session.endSession();
+
+        const createdUser = await User.findById(user[0]._id).select("-password -refreshToken")
+      
+        return res
+            .status(201)
+            .json(
+                new ApiResponse(
+                201,
+                { user: createdUser, company: company[0] },
+                "Company registered successfully. Wait for admin approval."
+                )
+            )
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        throw new ApiError(500, "Registration failed during transaction: " + error.message);
+    }
   })
 
 const loginUser= asyncHandler(async (req,res)=>{
@@ -186,7 +211,7 @@ const loginUser= asyncHandler(async (req,res)=>{
      .json(
           new ApiResponse(
                200,{
-                    user: loggedInUser,accessToken,refreshToken
+                    user: loggedInUser
                },
                "User logged In Successful"
           )
@@ -452,7 +477,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
       .json(
           new ApiResponse(
               200,
-              { accessToken, refreshToken: newRefreshToken },
+              {},
               "Access token refreshed successfully"
           )
       );
