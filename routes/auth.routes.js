@@ -9,6 +9,7 @@ import {
     updateCompanyProfile,
     updateAdminProfile,
     getCurrentUser,
+    getStudentResume,
     refreshAccessToken,
     getAllColleges
 } from "../controllers/auth.controller.js";
@@ -25,6 +26,7 @@ router.post("/register/company",registerCompany);
 router.post("/logout", verifyJWT, logoutUser);
 router.post("/change-password", verifyJWT, changePassword);
 router.get("/current-user", verifyJWT, getCurrentUser);
+router.get("/resume", verifyJWT, getStudentResume);
 router.post("/refresh-token", refreshAccessToken);
 
 // Profile Updates with Multer Uploads
@@ -32,4 +34,4 @@ router.patch("/update-student", verifyJWT, upload.single("resume"), updateStuden
 router.patch("/update-company", verifyJWT, upload.single("logo"), updateCompanyProfile);
 router.patch("/update-admin", verifyJWT, updateAdminProfile);
 
-export default router; 
+export default router;

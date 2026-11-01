@@ -42,10 +42,12 @@ const jobSchema = new Schema(
     ctcMin: {
       type: Number,
       required: true,
+      min: 0,
     },
     ctcMax: {
       type: Number,
       required: true,
+      min: 0,
     },
     cgpaCutoff: {
       type: Number,

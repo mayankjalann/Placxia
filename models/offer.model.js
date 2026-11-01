@@ -44,4 +44,6 @@ const offerSchema = new Schema(
   { timestamps: true }
 );
 
+offerSchema.index({ application: 1 }, { unique: true });
+
 export const Offer = mongoose.model("Offer", offerSchema);

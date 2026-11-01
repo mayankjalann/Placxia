@@ -58,6 +58,14 @@ const studentSchema = new Schema(
     resumePublicId: {
       type: String,
     },
+    resumeData: {
+      type: Buffer,
+      select: false,
+    },
+    resumeContentType: {
+      type: String,
+      select: false,
+    },
     linkedinUrl: {
       type: String,
       trim: true,

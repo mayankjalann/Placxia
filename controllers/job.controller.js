@@ -13,6 +13,13 @@ const hasApprovedAllColleges = (company, collegeIds) =>
         company.requestedColleges.some((requestedId) => requestedId.toString() === collegeId.toString())
     );
 
+const isDeadlineCurrent = (deadline) => {
+    const deadlineEnd = new Date(deadline);
+    if (Number.isNaN(deadlineEnd.getTime())) return false;
+    deadlineEnd.setUTCHours(23, 59, 59, 999);
+    return deadlineEnd >= new Date();
+};
+
 const createJob=asyncHandler(async (req,res)=>{
     const company= await Company.findOne({user: req.user._id});
 
@@ -41,6 +48,16 @@ const createJob=asyncHandler(async (req,res)=>{
       // 4. Basic validation
       if (!title || !description || !positionsAvailable || !jobType || !deadline) {
         throw new ApiError(400, "Missing required job fields");
+      }
+      if (!Number.isInteger(Number(positionsAvailable)) || Number(positionsAvailable) < 1) {
+        throw new ApiError(400, "Number of positions must be a positive whole number");
+      }
+      if (!Number.isFinite(Number(ctcMin)) || !Number.isFinite(Number(ctcMax)) ||
+          Number(ctcMin) < 0 || Number(ctcMax) < Number(ctcMin)) {
+        throw new ApiError(400, "Enter a valid salary range");
+      }
+      if (!isDeadlineCurrent(deadline)) {
+        throw new ApiError(400, "Application deadline must be today or a future date");
       }
 
       if (!Array.isArray(eligibleColleges) || eligibleColleges.length === 0) {
@@ -119,6 +136,13 @@ const publishJob = asyncHandler(async (req, res) => {
     if (!job.title || !job.description || !job.deadline) {
       throw new ApiError(400, "Job is incomplete. Cannot publish");
     }
+    if (!isDeadlineCurrent(job.deadline)) {
+      throw new ApiError(400, "Application deadline has passed");
+    }
+    if (!Number.isFinite(Number(job.ctcMin)) || !Number.isFinite(Number(job.ctcMax)) ||
+        Number(job.ctcMin) < 0 || Number(job.ctcMax) < Number(job.ctcMin)) {
+      throw new ApiError(400, "Enter a valid salary range before publishing");
+    }
   
     // 6. publish job
     job.status = "OPEN";
@@ -196,6 +220,10 @@ const updateJob = asyncHandler(async (req, res) => {
         }
     });
 
+    if (!isDeadlineCurrent(job.deadline)) {
+        throw new ApiError(400, "Application deadline must be today or a future date");
+    }
+
     await job.save();
 
     return res.status(200).json(
@@ -253,17 +281,22 @@ const getCompanyJobs = asyncHandler(async (req, res) => {
 });
 
 const getAllOpenJobs= asyncHandler(async(req,res)=>{
-    // Find the logged-in student to get their college
-    const student = await Student.findOne({ user: req.user._id });
-    if (!student) {
-        throw new ApiError(404, "Student profile not found");
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const jobFilter = {
+        status: "OPEN",
+        deadline: { $gte: todayStart }
+    };
+
+    if (req.user.role === "STUDENT") {
+        const student = await Student.findOne({ user: req.user._id });
+        if (!student) {
+            throw new ApiError(404, "Student profile not found");
+        }
+        jobFilter.eligibleColleges = { $in: [student.college] };
     }
 
-    // Only fetch jobs that are OPEN and meant for this student's college!
-    const openJobs = await Job.find({ 
-        status: "OPEN",
-        eligibleColleges: { $in: [student.college] } 
-    })
+    const openJobs = await Job.find(jobFilter)
     .populate("company","name industry logoUrl")
     .sort({createdAt: -1}); //descending order
 
@@ -281,6 +314,19 @@ const getJobById = asyncHandler(async (req, res) => {
 
     if (!job) {
         throw new ApiError(404, "Job not found");
+    }
+
+    if (req.user.role === "STUDENT") {
+        const student = await Student.findOne({ user: req.user._id });
+        if (!student) {
+            throw new ApiError(404, "Student profile not found");
+        }
+        const isEligibleCollege = job.eligibleColleges.some(
+            (collegeId) => collegeId.toString() === student.college.toString()
+        );
+        if (job.status !== "OPEN" || !isDeadlineCurrent(job.deadline) || !isEligibleCollege) {
+            throw new ApiError(404, "Job not found");
+        }
     }
 
     return res.status(200).json(

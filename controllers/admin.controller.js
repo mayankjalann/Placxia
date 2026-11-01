@@ -62,9 +62,14 @@ const getUnapprovedCompanies = asyncHandler(async (req, res) => {
 
 const addAllowedStudent=asyncHandler(async(req,res)=>{
     const {email,rollNo,branch,batch}=req.body;
+    const normalizedEmail = email?.trim().toLowerCase();
+    const allowedBranches = ["CSE", "IT", "ECE", "EE", "ME", "CE", "OTHER"];
 
-    if( !email || !rollNo || !branch || !batch){
+    if( !normalizedEmail || !rollNo?.trim() || !branch || !batch?.trim()){
         throw new ApiError(400, "Email, rollNo, branch, and batch are required");
+    }
+    if (!allowedBranches.includes(branch)) {
+        throw new ApiError(400, "Select a valid branch");
     }
 
     const admin=await Admin.findOne({user:req.user._id});
@@ -74,7 +79,7 @@ const addAllowedStudent=asyncHandler(async(req,res)=>{
     }
 
     const existingStudent= await AllowedStudent.findOne({
-        $or: [{email},{rollNo}]
+        $or: [{email: normalizedEmail},{rollNo: rollNo.trim()}]
     });
 
     if(existingStudent){
@@ -83,10 +88,10 @@ const addAllowedStudent=asyncHandler(async(req,res)=>{
 
     const allowedStudent = await AllowedStudent.create({
         college: admin.college,
-        email,
-        rollNo,
+        email: normalizedEmail,
+        rollNo: rollNo.trim(),
         branch,
-        batch,
+        batch: batch.trim(),
         isRegistered: false
     });
 

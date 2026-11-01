@@ -10,6 +10,7 @@ import applicationRouter from "../routes/application.routes.js"
 
 
 const app=express();
+app.set("trust proxy", 1);
 
 app.use(
     cors({
@@ -32,6 +33,45 @@ app.use("/api/v1/job",jobRouter);
 app.use("/api/v1/application",applicationRouter)
 app.use("/api/v1/offer",offerRouter);
 app.use("/api/v1/admin",adminRouter)
+
+app.use((req, res) => {
+    return res.status(404).json({
+        success: false,
+        message: "API route not found"
+    });
+});
+
+app.use((error, req, res, next) => {
+    if (res.headersSent) {
+        return next(error);
+    }
+
+    const isMulterError = error.name === "MulterError";
+    const isValidationError = error.name === "ValidationError" || error.name === "CastError";
+    const isDuplicateError = error.code === 11000;
+    const statusCode = isDuplicateError
+        ? 409
+        : isMulterError
+            ? (error.code === "LIMIT_FILE_SIZE" ? 413 : 400)
+            : isValidationError
+                ? 400
+                : (error.statusCode || error.status || 500);
+
+    console.error("API request failed:", error);
+    const message = isDuplicateError
+        ? "A record with these details already exists"
+        : isMulterError && error.code === "LIMIT_FILE_SIZE"
+            ? "File is too large. Maximum size is 4 MB"
+            : statusCode >= 500
+                ? "Something went wrong. Please try again."
+                : (error.message || "Request failed");
+
+    return res.status(statusCode).json({
+        success: false,
+        message,
+        errors: statusCode < 500 ? (error.errors || []) : []
+    });
+});
 
 
 export default app;

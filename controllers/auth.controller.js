@@ -1,4 +1,3 @@
-import mongoose from "mongoose";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
@@ -9,7 +8,17 @@ import { Admin } from "../models/admin.model.js";
 import { AllowedStudent } from "../models/allowedStudent.model.js";
 import { Student } from "../models/student.model.js";
 import jwt from "jsonwebtoken"
-import { uploadOnCloudinary, deleteFromCloudinary, getSignedCloudinaryUrl } from "../utils/cloudinary.js";
+import { readFile, unlink } from "node:fs/promises";
+import { extname } from "node:path";
+import mongoose from "mongoose";
+import { uploadOnCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
+
+const getRequestOrigin = (req) => {
+  const protocol = req.get("x-forwarded-proto")?.split(",")[0] || req.protocol;
+  return protocol + "://" + req.get("host");
+};
+
+const getStudentResumeUrl = (req) => getRequestOrigin(req) + "/api/v1/auth/resume";
 
 const generateAccessAndRefreshTokens= async(userId)=>{
   try{
@@ -31,13 +40,17 @@ const generateAccessAndRefreshTokens= async(userId)=>{
 }
 
 const registerStudent=asyncHandler(async(req,res)=>{
-    const {email,password}=req.body;
+    const {email,password,name,phone,college}=req.body;
+    const normalizedEmail = email?.trim().toLowerCase();
 
-    if(!email || !password){
-        throw new ApiError(400,"email and password are required");
+    if(!normalizedEmail || !password){
+        throw new ApiError(400,"Email and password are required");
+    }
+    if(password.length < 6){
+        throw new ApiError(400,"Password must be at least 6 characters long");
     }
 
-    const allowedStudent=await AllowedStudent.findOne({ email });
+    const allowedStudent=await AllowedStudent.findOne({ email: normalizedEmail });
 
     if(!allowedStudent){
         throw new ApiError(403, "You are not registered in this college system")
@@ -47,55 +60,62 @@ const registerStudent=asyncHandler(async(req,res)=>{
         throw new ApiError(409, "Account already exists. Please login")
     }
 
-    const existingUser= await User.findOne({email});
+    if (college && college.toString() !== allowedStudent.college.toString()) {
+        throw new ApiError(403, "The selected college does not match your authorized student record");
+    }
+
+    const existingUser= await User.findOne({email: normalizedEmail});
 
     if(existingUser){
         throw new ApiError(409, "User already exists with this email")
     }
 
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
+    let user;
+    let student;
     try {
-        const user=await User.create([{
-            email,
+        user=await User.create({
+            email: normalizedEmail,
             password,
             role: "STUDENT",
             college: allowedStudent.college,
             isVerified: true
-        }], { session });
+        });
 
-        const student = await Student.create([{
-            user: user[0]._id,
+        student = await Student.create({
+            user: user._id,
             college: allowedStudent.college,
             rollNo: allowedStudent.rollNo,
             branch: allowedStudent.branch,
             batch: allowedStudent.batch,
-            name: email.split("@")[0], // temp name from email
-        }], { session });
+            name: name?.trim() || normalizedEmail.split("@")[0],
+            phone: phone?.trim() || undefined,
+        });
           
         // also mark as registered
-        allowedStudent.isRegistered = true
-        await allowedStudent.save({ session })
+        allowedStudent.isRegistered = true;
+        await allowedStudent.save();
 
-        await session.commitTransaction();
-        session.endSession();
-
-        const createdUser= await User.findById(user[0]._id).select("-password -refreshToken")
+        const createdUser= await User.findById(user._id).select("-password -refreshToken");
 
         return res
         .status(201)
         .json(
             new ApiResponse(
             201,
-            { user: createdUser, student: student[0] },
+            { user: createdUser, student },
             "Student registered successfully"
             )
         )
     } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
-        throw new ApiError(500, "Registration failed during transaction: " + error.message);
+        if (student?._id) {
+            await Student.deleteOne({ _id: student._id }).catch(() => {});
+        }
+        if (user?._id) {
+            await User.deleteOne({ _id: user._id }).catch(() => {});
+        }
+        allowedStudent.isRegistered = false;
+        await allowedStudent.save().catch(() => {});
+        throw error;
     }
 
 
@@ -103,9 +123,10 @@ const registerStudent=asyncHandler(async(req,res)=>{
 
 const registerCompany = asyncHandler(async (req, res) => {
     const { email, password, name, industry, website, description, requestedColleges } = req.body;
+    const normalizedEmail = email?.trim().toLowerCase();
     const allowedIndustries = ["TECH", "FINANCE", "CORE", "CONSULTING", "ECOMMERCE", "OTHER"];
 
-    if (!email || !password || !name || !industry || !website || !description) {
+    if (!normalizedEmail || !password || !name || !industry || !website || !description) {
         throw new ApiError(400, "Email, password, company name, industry, website, and description are required");
     }
     if (password.length < 6) {
@@ -117,8 +138,18 @@ const registerCompany = asyncHandler(async (req, res) => {
     if (!Array.isArray(requestedColleges) || requestedColleges.length === 0) {
         throw new ApiError(400, "Request at least one college to partner with");
     }
+    const uniqueRequestedColleges = [...new Set(requestedColleges.map(String))];
+    if (!uniqueRequestedColleges.every(mongoose.isValidObjectId)) {
+        throw new ApiError(400, "One or more requested colleges are invalid");
+    }
+    const matchingColleges = await College.countDocuments({
+        _id: { $in: uniqueRequestedColleges }
+    });
+    if (matchingColleges !== uniqueRequestedColleges.length) {
+        throw new ApiError(400, "One or more requested colleges could not be found");
+    }
 
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email: normalizedEmail });
     if (existingUser) {
         const existingCompany = await Company.findOne({ user: existingUser._id });
         if (existingCompany) {
@@ -139,7 +170,7 @@ const registerCompany = asyncHandler(async (req, res) => {
     }
 
     const user = await User.create({
-        email,
+        email: normalizedEmail,
         password,
         role: "COMPANY",
         college: null,
@@ -154,7 +185,7 @@ const registerCompany = asyncHandler(async (req, res) => {
             industry,
             website,
             description,
-            requestedColleges,
+            requestedColleges: uniqueRequestedColleges,
         });
     } catch (error) {
         // Avoid leaving a login account behind if the company profile cannot be created.
@@ -174,12 +205,12 @@ const registerCompany = asyncHandler(async (req, res) => {
 
 const loginUser= asyncHandler(async (req,res)=>{
     const {email,password}=req.body;
+    const normalizedEmail = email?.trim().toLowerCase();
 
-    if(!email || !password){
+    if(!normalizedEmail || !password){
         throw new ApiError(400,"Email and password required");
     }
-    console.log("Looking for email:", email)
-    const user=await User.findOne({email});
+    const user=await User.findOne({email: normalizedEmail});
 
     if(!user){
         throw new ApiError(404, "User does not exist");
@@ -202,14 +233,22 @@ const loginUser= asyncHandler(async (req,res)=>{
      // CHEAT CODE: Manually "populate" the profile based on the role so Redux has their name!
      if (loggedInUser.role === "STUDENT") {
          const student = await Student.findOne({ user: user._id }).lean();
+         if (!student) throw new ApiError(404, "Student profile not found");
          loggedInUser.studentProfile = student;
-         loggedInUser.name = student.name; // Attach name directly for easy access
+         if (student.resumeUrl === "/api/v1/auth/resume") {
+             student.resumeUrl = getStudentResumeUrl(req);
+         } else if (student.resumeUrl?.startsWith("http://localhost:")) {
+             student.resumeUrl = null;
+         }
+         loggedInUser.name = student.name;
      } else if (loggedInUser.role === "COMPANY") {
          const company = await Company.findOne({ user: user._id }).lean();
+         if (!company) throw new ApiError(409, "Company profile is missing. Please contact support.");
          loggedInUser.companyProfile = company;
          loggedInUser.name = company.name;
      } else if (loggedInUser.role === "ADMIN") {
          const admin = await Admin.findOne({ user: user._id }).lean();
+         if (!admin) throw new ApiError(409, "Admin profile is missing. Please contact support.");
          loggedInUser.adminProfile = admin;
          loggedInUser.name = admin.name;
      }
@@ -300,18 +339,24 @@ const updateStudentProfile = asyncHandler(async (req, res) => {
   const student = await Student.findOne({ user: req.user._id });
 
   if (!student) {
+      if (req.file?.path) await unlink(req.file.path).catch(() => {});
       throw new ApiError(404, "Student profile not found");
   }
 
-  // Handle Resume Upload (Bypassing Cloudinary due to PDF corruption on free tier)
   if (req.file) {
-      // Instead of Cloudinary, we will just use the local file path that Multer already saved!
-      // The file is saved at: public/temp/filename.pdf
-      // We will generate a local URL so the frontend can access it directly from our Express server.
-      const localUrl = `http://localhost:8000/temp/${req.file.filename}`;
-      
-      student.resumeUrl = localUrl;
-      student.resumePublicId = "local"; // No public ID needed for local files
+      if (req.file.mimetype !== "application/pdf" || extname(req.file.originalname).toLowerCase() !== ".pdf") {
+          await unlink(req.file.path).catch(() => {});
+          throw new ApiError(400, "Resume must be a PDF file");
+      }
+
+      try {
+          student.resumeData = await readFile(req.file.path);
+      } finally {
+          await unlink(req.file.path).catch(() => {});
+      }
+      student.resumeContentType = "application/pdf";
+      student.resumeUrl = "/api/v1/auth/resume";
+      student.resumePublicId = undefined;
   }
 
   const allowedFields = [
@@ -324,9 +369,7 @@ const updateStudentProfile = asyncHandler(async (req, res) => {
       "twelfthPercentage",
       "skills",
       "linkedinUrl",
-      "githubUrl",
-      "resumeUrl",
-      "resumePublicId"
+      "githubUrl"
   ];
 
   allowedFields.forEach((field) => {
@@ -342,27 +385,42 @@ const updateStudentProfile = asyncHandler(async (req, res) => {
   );
 });
 
+const getStudentResume = asyncHandler(async (req, res) => {
+  const student = await Student.findOne({ user: req.user._id })
+      .select("+resumeData +resumeContentType");
+  if (!student?.resumeData) {
+      throw new ApiError(404, "No resume has been uploaded");
+  }
+
+  return res
+      .type(student.resumeContentType || "application/pdf")
+      .set("Content-Disposition", `inline; filename="resume-${student._id}.pdf"`)
+      .set("Cache-Control", "private, no-store")
+      .send(student.resumeData);
+});
+
 const updateCompanyProfile = asyncHandler(async (req, res) => {
 
   const company = await Company.findOne({ user: req.user._id });
 
   if (!company) {
+      if (req.file?.path) await unlink(req.file.path).catch(() => {});
       throw new ApiError(404, "Company profile not found");
   }
 
-  // Handle Logo Upload
+  let uploadedLogo;
+  const oldLogoPublicId = company.logoPublicId;
   if (req.file) {
+      if (!req.file.mimetype.startsWith("image/")) {
+          await unlink(req.file.path).catch(() => {});
+          throw new ApiError(400, "Company logo must be an image");
+      }
       const uploadResult = await uploadOnCloudinary(req.file.path);
       if (!uploadResult) {
           throw new ApiError(500, "Failed to upload logo to Cloudinary");
       }
-      
-      // Delete old logo if it exists
-      if (company.logoPublicId) {
-          await deleteFromCloudinary(company.logoPublicId);
-      }
-      
-      company.logoUrl = uploadResult.url;
+      uploadedLogo = uploadResult;
+      company.logoUrl = uploadResult.secure_url;
       company.logoPublicId = uploadResult.public_id;
   }
 
@@ -384,7 +442,18 @@ const updateCompanyProfile = asyncHandler(async (req, res) => {
       }
   });
 
-  await company.save();
+  try {
+      await company.save();
+  } catch (error) {
+      if (uploadedLogo?.public_id) {
+          await deleteFromCloudinary(uploadedLogo.public_id, "image");
+      }
+      throw error;
+  }
+
+  if (uploadedLogo && oldLogoPublicId) {
+      await deleteFromCloudinary(oldLogoPublicId, "image");
+  }
 
   return res.status(200).json(
       new ApiResponse(200, company, "Company profile updated successfully")
@@ -427,14 +496,22 @@ const getCurrentUser = asyncHandler(async (req, res) => {
 
   if (user.role === "STUDENT") {
       const student = await Student.findOne({ user: user._id }).lean();
+      if (!student) throw new ApiError(404, "Student profile not found");
       user.studentProfile = student;
+      if (student.resumeUrl === "/api/v1/auth/resume") {
+          student.resumeUrl = getStudentResumeUrl(req);
+      } else if (student.resumeUrl?.startsWith("http://localhost:")) {
+          student.resumeUrl = null;
+      }
       user.name = student.name;
   } else if (user.role === "COMPANY") {
       const company = await Company.findOne({ user: user._id }).lean();
+      if (!company) throw new ApiError(409, "Company profile is missing. Please contact support.");
       user.companyProfile = company;
       user.name = company.name;
   } else if (user.role === "ADMIN") {
       const admin = await Admin.findOne({ user: user._id }).lean();
+      if (!admin) throw new ApiError(409, "Admin profile is missing. Please contact support.");
       user.adminProfile = admin;
       user.name = admin.name;
   }
@@ -516,6 +593,7 @@ export {
     updateCompanyProfile,
     updateAdminProfile,
     getCurrentUser,
+    getStudentResume,
     refreshAccessToken,
     getAllColleges
 };

@@ -11,8 +11,8 @@ const createOffer=asyncHandler(async (req,res)=>{
 
     const{offeredCtc,joiningDate}=req.body;
 
-    if(!offeredCtc){
-        throw new ApiError(400, "Offered CTC is required");
+    if(!Number.isFinite(Number(offeredCtc)) || Number(offeredCtc) <= 0){
+        throw new ApiError(400, "Offered CTC must be greater than zero");
     }
 
     const company= await Company.findOne({user: req.user._id});
@@ -23,6 +23,10 @@ const createOffer=asyncHandler(async (req,res)=>{
 
     const application= await Application.findById(applicationId)
     .populate("job");
+
+    if(!application || !application.job){
+        throw new ApiError(404, "Application or its job was not found");
+    }
 
     if(application.job.company.toString() !== company._id.toString()){
         throw new ApiError(403, "You cannot make an offer for this job");
@@ -38,15 +42,23 @@ const createOffer=asyncHandler(async (req,res)=>{
         throw new ApiError(400, "An offer has already been made for this application");
     }
 
-    const offer= await Offer.create({
-        student: application.student,
-        company: company._id,
-        job: application.job._id,
-        application: application._id,
-        offeredCtc,
-        joiningDate,
-        status: "PENDING" 
-    });
+    let offer;
+    try {
+        offer = await Offer.create({
+            student: application.student,
+            company: company._id,
+            job: application.job._id,
+            application: application._id,
+            offeredCtc: Number(offeredCtc),
+            joiningDate,
+            status: "PENDING"
+        });
+    } catch (error) {
+        if (error.code === 11000) {
+            throw new ApiError(409, "An offer has already been made for this application");
+        }
+        throw error;
+    }
 
     return res.status(201).json(
         new ApiResponse(201, offer, "Offer successfully sent to the student!")
@@ -86,9 +98,12 @@ const respondToOffer= asyncHandler(async(req,res)=>{
     await offer.save();
 
     if(status=="ACCEPTED"){
-        student.placementStatus="PLACED";
+        student.placementStatus = student.placementStatus === "PLACED" || student.placementStatus === "MULTIPLE_OFFERS"
+            ? "MULTIPLE_OFFERS"
+            : "PLACED";
         student.placedAt= new Date();
         student.placedInJob=offer.job;
+        student.currentOffer=offer._id;
 
         await student.save();
     }
