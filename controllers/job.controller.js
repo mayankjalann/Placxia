@@ -5,6 +5,13 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { User } from "../models/user.model.js";
 import { Student } from "../models/student.model.js";
+import mongoose from "mongoose";
+
+const hasApprovedAllColleges = (company, collegeIds) =>
+    Array.isArray(collegeIds) && collegeIds.length > 0 && collegeIds.every((collegeId) =>
+        company.approvedColleges.some((approvedId) => approvedId.toString() === collegeId.toString()) &&
+        company.requestedColleges.some((requestedId) => requestedId.toString() === collegeId.toString())
+    );
 
 const createJob=asyncHandler(async (req,res)=>{
     const company= await Company.findOne({user: req.user._id});
@@ -36,14 +43,14 @@ const createJob=asyncHandler(async (req,res)=>{
         throw new ApiError(400, "Missing required job fields");
       }
 
-      // 5. Check if company is approved by ALL requested colleges
-      if (eligibleColleges && eligibleColleges.length > 0) {
-        const unapproved = eligibleColleges.filter(
-            id => !company.approvedColleges.includes(id)
-        );
-        if (unapproved.length > 0) {
-            throw new ApiError(403, "You can only post jobs to colleges that have approved your company.");
-        }
+      if (!Array.isArray(eligibleColleges) || eligibleColleges.length === 0) {
+        throw new ApiError(400, "Select at least one approved college for this job");
+      }
+      if (!eligibleColleges.every(mongoose.isValidObjectId)) {
+        throw new ApiError(400, "One or more selected colleges are invalid");
+      }
+      if (!hasApprovedAllColleges(company, eligibleColleges)) {
+        throw new ApiError(403, "You can only post jobs to colleges that have approved your company.");
       }
 
       const job = await Job.create({
@@ -102,6 +109,10 @@ const publishJob = asyncHandler(async (req, res) => {
     // 4. ensure only draft jobs can be published
     if (job.status !== "DRAFT") {
       throw new ApiError(400, "Only draft jobs can be published");
+    }
+
+    if (!hasApprovedAllColleges(company, job.eligibleColleges)) {
+      throw new ApiError(403, "Your company must be approved for every selected college before publishing this job.");
     }
   
     // 5. validate required fields before publishing
@@ -165,6 +176,18 @@ const updateJob = asyncHandler(async (req, res) => {
         "allowedBranches",
         "eligibleColleges"
     ];
+
+    if (req.body.eligibleColleges !== undefined) {
+        if (!Array.isArray(req.body.eligibleColleges) || req.body.eligibleColleges.length === 0) {
+            throw new ApiError(400, "Select at least one approved college for this job");
+        }
+        if (!req.body.eligibleColleges.every(mongoose.isValidObjectId)) {
+            throw new ApiError(400, "One or more selected colleges are invalid");
+        }
+        if (!hasApprovedAllColleges(company, req.body.eligibleColleges)) {
+            throw new ApiError(403, "You can only target colleges that have approved your company.");
+        }
+    }
 
     // Loop through and update only what was sent in the request
     allowedFields.forEach((field) => {
@@ -272,4 +295,4 @@ updateJob,
 closeJob,
 getCompanyJobs,
 getAllOpenJobs,
-getJobById}; 
+getJobById};

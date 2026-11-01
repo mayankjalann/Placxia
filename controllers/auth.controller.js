@@ -102,59 +102,60 @@ const registerStudent=asyncHandler(async(req,res)=>{
 })
 
 const registerCompany = asyncHandler(async (req, res) => {
+    const { email, password, name, industry, website, description, requestedColleges } = req.body;
+    const allowedIndustries = ["TECH", "FINANCE", "CORE", "CONSULTING", "ECOMMERCE", "OTHER"];
 
-    const { email, password, name, industry, website, description, requestedColleges } = req.body
-  
-    if (!email || !password || !name || !industry || !requestedColleges) {
-      throw new ApiError(400, "Email, password, name, industry, and requestedColleges are required")
+    if (!email || !password || !name || !industry || !website || !description) {
+        throw new ApiError(400, "Email, password, company name, industry, website, and description are required");
     }
-  
-    const existingUser = await User.findOne({ email })
+    if (password.length < 6) {
+        throw new ApiError(400, "Password must be at least 6 characters long");
+    }
+    if (!allowedIndustries.includes(industry)) {
+        throw new ApiError(400, "Please select a valid industry");
+    }
+    if (!Array.isArray(requestedColleges) || requestedColleges.length === 0) {
+        throw new ApiError(400, "Request at least one college to partner with");
+    }
+
+    const existingUser = await User.findOne({ email });
     if (existingUser) {
-      throw new ApiError(409, "Company already registered with this email")
+        throw new ApiError(409, "Company already registered with this email");
     }
-  
-    const session = await mongoose.startSession();
-    session.startTransaction();
 
+    const user = await User.create({
+        email,
+        password,
+        role: "COMPANY",
+        college: null,
+        isVerified: true,
+    });
+
+    let company;
     try {
-        const user = await User.create([{
-            email,
-            password,
-            role: "COMPANY",
-            college: null,
-            isVerified: true,
-        }], { session })
-      
-        const company = await Company.create([{
-            user: user[0]._id,
+        company = await Company.create({
+            user: user._id,
             name,
             industry,
             website,
             description,
             requestedColleges,
-        }], { session })
-      
-        await session.commitTransaction();
-        session.endSession();
-
-        const createdUser = await User.findById(user[0]._id).select("-password -refreshToken")
-      
-        return res
-            .status(201)
-            .json(
-                new ApiResponse(
-                201,
-                { user: createdUser, company: company[0] },
-                "Company registered successfully. Wait for admin approval."
-                )
-            )
+        });
     } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
-        throw new ApiError(500, "Registration failed during transaction: " + error.message);
+        // Avoid leaving a login account behind if the company profile cannot be created.
+        await User.deleteOne({ _id: user._id });
+        throw error;
     }
-  })
+
+    const createdUser = await User.findById(user._id).select("-password -refreshToken");
+    return res.status(201).json(
+        new ApiResponse(
+            201,
+            { user: createdUser, company },
+            "Company registered successfully. Wait for admin approval."
+        )
+    );
+});
 
 const loginUser= asyncHandler(async (req,res)=>{
     const {email,password}=req.body;

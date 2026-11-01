@@ -18,9 +18,21 @@ const approveCompany = asyncHandler(async (req, res) => {
         throw new ApiError(404, "Admin profile not found");
     }
 
-    // Check if already approved by THIS college
-    if (company.approvedColleges.includes(admin.college)) {
-        throw new ApiError(400, "Company is already approved for your college");
+    const requestedByThisCollege = company.requestedColleges.some(
+        (collegeId) => collegeId.toString() === admin.college.toString()
+    );
+    if (!requestedByThisCollege) {
+        throw new ApiError(403, "This company did not request approval for your college");
+    }
+
+    // Make approval safe to retry if the admin clicks twice or the response is delayed.
+    const alreadyApproved = company.approvedColleges.some(
+        (collegeId) => collegeId.toString() === admin.college.toString()
+    );
+    if (alreadyApproved) {
+        return res.status(200).json(
+            new ApiResponse(200, company, "Company is already approved for your college")
+        );
     }
 
     company.approvedColleges.push(admin.college);
