@@ -13,13 +13,6 @@ import { extname } from "node:path";
 import mongoose from "mongoose";
 import { uploadOnCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
 
-const getRequestOrigin = (req) => {
-  const protocol = req.get("x-forwarded-proto")?.split(",")[0] || req.protocol;
-  return protocol + "://" + req.get("host");
-};
-
-const getStudentResumeUrl = (req) => getRequestOrigin(req) + "/api/v1/auth/resume";
-
 const generateAccessAndRefreshTokens= async(userId)=>{
   try{
        const user= await User.findById(userId)
@@ -236,7 +229,7 @@ const loginUser= asyncHandler(async (req,res)=>{
          if (!student) throw new ApiError(404, "Student profile not found");
          loggedInUser.studentProfile = student;
          if (student.resumeUrl === "/api/v1/auth/resume") {
-             student.resumeUrl = getStudentResumeUrl(req);
+             student.resumeUrl = "/api/v1/auth/resume";
          } else if (student.resumeUrl?.startsWith("http://localhost:")) {
              student.resumeUrl = null;
          }
@@ -256,7 +249,7 @@ const loginUser= asyncHandler(async (req,res)=>{
      const options={
           httpOnly: true,
           secure: true,
-          sameSite: 'none'
+          sameSite: 'lax'
      } //ensures cookies non modifiable by frontend
 
      return res
@@ -289,7 +282,7 @@ const logoutUser=asyncHandler(async (req,res)=>{
 const options = {
     httpOnly: true,
     secure: true,
-    sameSite: 'none'
+    sameSite: 'lax'
 };
 
 return res
@@ -499,7 +492,7 @@ const getCurrentUser = asyncHandler(async (req, res) => {
       if (!student) throw new ApiError(404, "Student profile not found");
       user.studentProfile = student;
       if (student.resumeUrl === "/api/v1/auth/resume") {
-          student.resumeUrl = getStudentResumeUrl(req);
+          student.resumeUrl = "/api/v1/auth/resume";
       } else if (student.resumeUrl?.startsWith("http://localhost:")) {
           student.resumeUrl = null;
       }
@@ -560,7 +553,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
   const options = {
       httpOnly: true,
       secure: true,
-      sameSite: 'none'
+      sameSite: 'lax'
   };
 
   return res

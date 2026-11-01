@@ -93,11 +93,10 @@ const getJobApplicants= asyncHandler(async(req,res)=>{
         })
         .sort({ createdAt: -1 }); // Newest applications first
 
-    const origin = (req.get("x-forwarded-proto")?.split(",")[0] || req.protocol) + "://" + req.get("host");
     const responseApplications = applications.map((application) => {
         const result = application.toObject();
         if (result.student?.resumeUrl === "/api/v1/auth/resume") {
-            result.student.resumeUrl = origin + "/api/v1/application/resume/" + result.student._id;
+            result.student.resumeUrl = "/api/v1/application/resume/" + result.student._id;
         } else if (result.student?.resumeUrl?.startsWith("http://localhost:")) {
             result.student.resumeUrl = null;
         }
