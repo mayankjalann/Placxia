@@ -6,6 +6,9 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { User } from "../models/user.model.js";
 import { Student } from "../models/student.model.js";
 import mongoose from "mongoose";
+import { Application } from "../models/application.model.js";
+import { Offer } from "../models/offer.model.js";
+import { getStudentJobEligibilityReason } from "../utils/jobEligibility.js";
 
 const hasApprovedAllColleges = (company, collegeIds) =>
     Array.isArray(collegeIds) && collegeIds.length > 0 && collegeIds.every((collegeId) =>
@@ -18,6 +21,26 @@ const isDeadlineCurrent = (deadline) => {
     if (Number.isNaN(deadlineEnd.getTime())) return false;
     deadlineEnd.setUTCHours(23, 59, 59, 999);
     return deadlineEnd >= new Date();
+};
+
+const validateEligibilityFields = (fields) => {
+    const numericRanges = { cgpaCutoff: [0, 10], tenthCutoff: [0, 100], twelfthCutoff: [0, 100] };
+    for (const [field, [min, max]] of Object.entries(numericRanges)) {
+        if (fields[field] === undefined) continue;
+        const value = Number(fields[field]);
+        if (!Number.isFinite(value) || value < min || value > max) {
+            throw new ApiError(400, `${field} must be between ${min} and ${max}`);
+        }
+    }
+    const allowedBranches = ["CSE", "IT", "ECE", "EE", "ME", "CE", "OTHER"];
+    if (fields.allowedBranches !== undefined && (!Array.isArray(fields.allowedBranches) || fields.allowedBranches.some((branch) => !allowedBranches.includes(branch)))) {
+        throw new ApiError(400, "Select valid branch codes for eligibility");
+    }
+    for (const field of ["requiredSkills", "batchEligible"]) {
+        if (fields[field] !== undefined && (!Array.isArray(fields[field]) || fields[field].length > 50 || fields[field].some((value) => typeof value !== "string" || !value.trim()))) {
+            throw new ApiError(400, `${field} must be a list of valid values`);
+        }
+    }
 };
 
 const createJob=asyncHandler(async (req,res)=>{
@@ -59,6 +82,7 @@ const createJob=asyncHandler(async (req,res)=>{
       if (!isDeadlineCurrent(deadline)) {
         throw new ApiError(400, "Application deadline must be today or a future date");
       }
+      validateEligibilityFields({ cgpaCutoff, tenthCutoff, twelfthCutoff, allowedBranches, requiredSkills, batchEligible });
 
       if (!Array.isArray(eligibleColleges) || eligibleColleges.length === 0) {
         throw new ApiError(400, "Select at least one approved college for this job");
@@ -213,6 +237,8 @@ const updateJob = asyncHandler(async (req, res) => {
         }
     }
 
+    validateEligibilityFields(req.body);
+
     // Loop through and update only what was sent in the request
     allowedFields.forEach((field) => {
         if (req.body[field] !== undefined) {
@@ -300,8 +326,30 @@ const getAllOpenJobs= asyncHandler(async(req,res)=>{
     .populate("company","name industry logoUrl")
     .sort({createdAt: -1}); //descending order
 
+    let visibleJobs = openJobs;
+    if (req.user.role === "STUDENT") {
+        const student = await Student.findOne({ user: req.user._id });
+        visibleJobs = visibleJobs.filter((job) => !getStudentJobEligibilityReason(job, student));
+    }
+    const search = req.query.search?.trim();
+    if (search) {
+        const normalizedSearch = search.toLowerCase();
+        visibleJobs = visibleJobs.filter((job) =>
+            [job.title, job.description, job.company?.name, job.location, ...(job.requiredSkills || [])]
+                .some((value) => value?.toLowerCase().includes(normalizedSearch))
+        );
+    }
+    if (req.query.jobType) visibleJobs = visibleJobs.filter((job) => job.jobType === req.query.jobType);
+    if (req.query.location) {
+        const normalizedLocation = req.query.location.toLowerCase();
+        visibleJobs = visibleJobs.filter((job) => job.location?.toLowerCase().includes(normalizedLocation));
+    }
+    if (req.query.minSalary && Number.isFinite(Number(req.query.minSalary))) {
+        visibleJobs = visibleJobs.filter((job) => job.ctcMax >= Number(req.query.minSalary));
+    }
+
     return res.status(200).json(
-        new ApiResponse(200, openJobs, "Open jobs fetched successfully")
+        new ApiResponse(200, visibleJobs, "Open jobs fetched successfully")
     );
 
 })
@@ -321,10 +369,7 @@ const getJobById = asyncHandler(async (req, res) => {
         if (!student) {
             throw new ApiError(404, "Student profile not found");
         }
-        const isEligibleCollege = job.eligibleColleges.some(
-            (collegeId) => collegeId.toString() === student.college.toString()
-        );
-        if (job.status !== "OPEN" || !isDeadlineCurrent(job.deadline) || !isEligibleCollege) {
+        if (job.status !== "OPEN" || !isDeadlineCurrent(job.deadline) || getStudentJobEligibilityReason(job, student)) {
             throw new ApiError(404, "Job not found");
         }
     }
@@ -332,6 +377,53 @@ const getJobById = asyncHandler(async (req, res) => {
     return res.status(200).json(
         new ApiResponse(200, job, "Job details fetched successfully")
     );
+});
+
+const getSavedJobs = asyncHandler(async (req, res) => {
+    const student = await Student.findOne({ user: req.user._id });
+    if (!student) throw new ApiError(404, "Student profile not found");
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const jobs = await Job.find({
+        _id: { $in: student.savedJobs || [] },
+        status: "OPEN",
+        deadline: { $gte: todayStart },
+        eligibleColleges: student.college,
+    }).populate("company", "name industry logoUrl").sort({ createdAt: -1 });
+    const eligibleJobs = jobs.filter((job) => !getStudentJobEligibilityReason(job, student));
+    return res.status(200).json(new ApiResponse(200, eligibleJobs, "Saved jobs fetched"));
+});
+
+const toggleSavedJob = asyncHandler(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.jobId)) throw new ApiError(404, "Job not found");
+    const student = await Student.findOne({ user: req.user._id });
+    if (!student) throw new ApiError(404, "Student profile not found");
+    const job = await Job.findById(req.params.jobId);
+    if (!job || job.status !== "OPEN" || !isDeadlineCurrent(job.deadline)) throw new ApiError(404, "Open job not found");
+    const reason = getStudentJobEligibilityReason(job, student);
+    if (reason) throw new ApiError(403, reason);
+    const saved = (student.savedJobs || []).some((id) => id.toString() === job._id.toString());
+    if (saved) student.savedJobs = student.savedJobs.filter((id) => id.toString() !== job._id.toString());
+    else student.savedJobs.push(job._id);
+    await student.save();
+    return res.status(200).json(new ApiResponse(200, { saved: !saved }, saved ? "Job removed from saved jobs" : "Job saved"));
+});
+
+const getPublicStats = asyncHandler(async (req, res) => {
+    const [activePartners, openJobs, applications, placedStudents, highestOffer] = await Promise.all([
+        Company.countDocuments({ approvedColleges: { $exists: true, $ne: [] } }),
+        Job.countDocuments({ status: "OPEN", deadline: { $gte: new Date() } }),
+        Application.countDocuments(),
+        Student.countDocuments({ placementStatus: { $in: ["PLACED", "MULTIPLE_OFFERS"] } }),
+        Offer.findOne({ status: "ACCEPTED" }).sort({ offeredCtc: -1 }).select("offeredCtc").lean(),
+    ]);
+    return res.status(200).json(new ApiResponse(200, {
+        activePartners,
+        openJobs,
+        applications,
+        placedStudents,
+        highestPackage: highestOffer?.offeredCtc || 0,
+    }, "Public statistics fetched"));
 });
 
 
@@ -342,3 +434,4 @@ closeJob,
 getCompanyJobs,
 getAllOpenJobs,
 getJobById};
+export { getSavedJobs, toggleSavedJob, getPublicStats };

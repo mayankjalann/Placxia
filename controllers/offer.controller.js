@@ -5,6 +5,7 @@ import { Application } from "../models/application.model.js";
 import { Company } from "../models/company.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { Student } from "../models/student.model.js";
+import { notifyUser } from "../utils/notifications.js";
 
 const createOffer=asyncHandler(async (req,res)=>{
     const {applicationId}=req.params;
@@ -60,6 +61,17 @@ const createOffer=asyncHandler(async (req,res)=>{
         throw error;
     }
 
+    const student = await Student.findById(application.student).select("user");
+    if (student?.user) {
+        await notifyUser({
+            userId: student.user,
+            type: "OFFER_RECEIVED",
+            title: "You received an offer",
+            message: `${company.name} sent you an offer of ${offer.offeredCtc} LPA for ${application.job.title}.`,
+            link: "/dashboard",
+        });
+    }
+
     return res.status(201).json(
         new ApiResponse(201, offer, "Offer successfully sent to the student!")
     );
@@ -106,6 +118,17 @@ const respondToOffer= asyncHandler(async(req,res)=>{
         student.currentOffer=offer._id;
 
         await student.save();
+    }
+
+    const company = await Company.findById(offer.company).select("user name");
+    if (company?.user) {
+        await notifyUser({
+            userId: company.user,
+            type: `OFFER_${status}`,
+            title: `Offer ${status.toLowerCase()}`,
+            message: `${student.name} ${status.toLowerCase()} the offer for ${offer.offeredCtc} LPA.`,
+            link: "/dashboard",
+        });
     }
 
     return res.status(200).json(

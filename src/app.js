@@ -7,6 +7,7 @@ import offerRouter from "../routes/offer.routes.js"
 import adminRouter from "../routes/admin.routes.js"
 
 import applicationRouter from "../routes/application.routes.js"
+import notificationRouter from "../routes/notification.routes.js";
 
 
 const app=express();
@@ -19,7 +20,7 @@ app.use(
     })
   );
 
-app.use(express.json({limit: "16kb"})); // FOR DATA THAT COMES AS JSON
+app.use(express.json({limit: "1mb"})); // Supports admin batch imports up to 500 student rows
 
 app.use(express.urlencoded({ extended: true, limit: "16kb" })); // FOR DATA THAT COMES AS URL MAINLY IN FORM SUBMISION
 // EXTENDED for nested data
@@ -33,6 +34,7 @@ app.use("/api/v1/job",jobRouter);
 app.use("/api/v1/application",applicationRouter)
 app.use("/api/v1/offer",offerRouter);
 app.use("/api/v1/admin",adminRouter)
+app.use("/api/v1/notifications", notificationRouter);
 
 app.use((req, res) => {
     return res.status(404).json({

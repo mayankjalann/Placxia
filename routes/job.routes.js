@@ -2,9 +2,13 @@ import { Router } from "express";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
 import { verifyRole } from "../middlewares/role.middleware.js";
 import { createJob } from "../controllers/job.controller.js";
-import { publishJob, updateJob, closeJob, getCompanyJobs ,getAllOpenJobs, getJobById} from "../controllers/job.controller.js";
+import { publishJob, updateJob, closeJob, getCompanyJobs ,getAllOpenJobs, getJobById, getSavedJobs, toggleSavedJob, getPublicStats} from "../controllers/job.controller.js";
 
 const router= Router();
+
+router.get("/public-stats", getPublicStats);
+router.get("/saved", verifyJWT, verifyRole("STUDENT"), getSavedJobs);
+router.patch("/save/:jobId", verifyJWT, verifyRole("STUDENT"), toggleSavedJob);
 
 router.post("/create",verifyJWT,verifyRole("COMPANY"),createJob);
 

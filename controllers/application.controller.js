@@ -6,6 +6,8 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { Company } from "../models/company.model.js";
 import mongoose from "mongoose";
+import { notifyUser } from "../utils/notifications.js";
+import { getStudentJobEligibilityReason } from "../utils/jobEligibility.js";
 
 const applyForJob=asyncHandler(async (req,res)=>{
     const {jobId}=req.params;
@@ -28,14 +30,8 @@ const applyForJob=asyncHandler(async (req,res)=>{
         throw new ApiError(400, "This job is not accepting applications right now");
     }
 
-    // Security Check: Does this job allow applications from this student's college?
-    const isEligibleCollege = job.eligibleColleges.some(
-        collegeId => collegeId.toString() === student.college.toString()
-    );
-
-    if (!isEligibleCollege) {
-        throw new ApiError(403, "You are not authorized to apply for this job. It is not open to your college.");
-    }
+    const eligibilityReason = getStudentJobEligibilityReason(job, student);
+    if (eligibilityReason) throw new ApiError(403, eligibilityReason);
 
     const existingApplication= await Application.findOne({
         student: student._id,
@@ -59,6 +55,17 @@ const applyForJob=asyncHandler(async (req,res)=>{
             throw new ApiError(409, "You have already applied for this job");
         }
         throw error;
+    }
+
+    const company = await Company.findById(job.company).select("user");
+    if (company?.user) {
+        await notifyUser({
+            userId: company.user,
+            type: "NEW_APPLICATION",
+            title: "New student application",
+            message: `${student.name} applied for ${job.title}.`,
+            link: "/dashboard",
+        });
     }
 
     return res.status(201).json(
@@ -174,10 +181,69 @@ const updateApplicationStatus = asyncHandler(async (req, res) => {
     // 5. Update status and save
     application.status = status;
     await application.save();
+    const student = await Student.findById(application.student).select("user name");
+    if (student?.user) {
+        await notifyUser({
+            userId: student.user,
+            type: "APPLICATION_STATUS",
+            title: `Application ${status.toLowerCase()}`,
+            message: `Your application for ${application.job.title} is now ${status.toLowerCase()}.`,
+            link: "/dashboard",
+        });
+    }
 
     return res.status(200).json(
         new ApiResponse(200, application, `Application status updated to ${status}`)
     );
+});
+
+const upsertInterviewRound = asyncHandler(async (req, res) => {
+    const { applicationId } = req.params;
+    const { roundNo, roundType, scheduledAt, interviewerName, result, feedback } = req.body;
+    const allowedTypes = ["APTITUDE", "TECHNICAL", "HR", "GD"];
+    const allowedResults = ["PASS", "FAIL", "PENDING"];
+    if (!Number.isInteger(Number(roundNo)) || Number(roundNo) < 1 || !allowedTypes.includes(roundType)) {
+        throw new ApiError(400, "Choose a valid round number and round type");
+    }
+    if (result !== undefined && !allowedResults.includes(result)) throw new ApiError(400, "Invalid round result");
+    if (scheduledAt && Number.isNaN(new Date(scheduledAt).getTime())) throw new ApiError(400, "Choose a valid interview date and time");
+
+    const company = await Company.findOne({ user: req.user._id });
+    if (!company) throw new ApiError(404, "Company profile not found");
+    const application = await Application.findById(applicationId).populate("job", "company title");
+    if (!application?.job) throw new ApiError(404, "Application not found");
+    if (application.job.company.toString() !== company._id.toString()) throw new ApiError(403, "You cannot manage interviews for this application");
+    if (application.status === "REJECTED") throw new ApiError(400, "Rejected applications cannot be scheduled for interview");
+
+    const existingRound = application.rounds.find((round) => round.roundNo === Number(roundNo));
+    const oldSchedule = existingRound?.scheduledAt?.getTime();
+    const roundData = {
+        roundNo: Number(roundNo),
+        roundType,
+        ...(scheduledAt ? { scheduledAt: new Date(scheduledAt) } : {}),
+        ...(interviewerName !== undefined ? { interviewerName: interviewerName.trim() } : {}),
+        ...(result !== undefined ? { result } : {}),
+        ...(feedback !== undefined ? { feedback: feedback.trim() } : {}),
+    };
+    if (existingRound) Object.assign(existingRound, roundData);
+    else application.rounds.push(roundData);
+    await application.save();
+
+    const newSchedule = scheduledAt ? new Date(scheduledAt).getTime() : null;
+    if (newSchedule && oldSchedule !== newSchedule) {
+        const student = await Student.findById(application.student).select("user");
+        if (student?.user) {
+            await notifyUser({
+                userId: student.user,
+                type: "INTERVIEW_SCHEDULED",
+                title: `${roundType.toLowerCase()} interview scheduled`,
+                message: `Round ${roundNo} for ${application.job.title} is scheduled for ${new Date(scheduledAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}.`,
+                link: "/dashboard",
+            });
+        }
+    }
+
+    return res.status(200).json(new ApiResponse(200, application, "Interview round saved"));
 });
 
 const getMyApplications = asyncHandler(async (req, res) => {
@@ -194,7 +260,7 @@ const getMyApplications = asyncHandler(async (req, res) => {
                 select: "name"
             }
         })
-        .select("job status createdAt")
+        .select("job status rounds createdAt")
         .sort({ createdAt: -1 });
     
     return res.status(200).json(
@@ -207,6 +273,7 @@ export {
     getJobApplicants,
     getApplicantResume,
     updateApplicationStatus,
+    upsertInterviewRound,
     getMyApplications
 }
 

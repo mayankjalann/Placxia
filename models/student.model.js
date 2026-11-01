@@ -52,6 +52,7 @@ const studentSchema = new Schema(
       type: [String],
       default: [],
     },
+    savedJobs: [{ type: Schema.Types.ObjectId, ref: "Job" }],
     resumeUrl: {
       type: String,
     },
