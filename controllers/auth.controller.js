@@ -120,7 +120,22 @@ const registerCompany = asyncHandler(async (req, res) => {
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-        throw new ApiError(409, "Company already registered with this email");
+        const existingCompany = await Company.findOne({ user: existingUser._id });
+        if (existingCompany) {
+            const approvedRequestedColleges = existingCompany.requestedColleges.filter((requestedId) =>
+                existingCompany.approvedColleges.some(
+                    (approvedId) => approvedId.toString() === requestedId.toString()
+                )
+            );
+
+            if (approvedRequestedColleges.length === 0) {
+                throw new ApiError(409, "Your company application is already submitted and waiting for college approval. Please sign in to check its status.");
+            }
+
+            throw new ApiError(409, "A company account already exists for this email. Please sign in to check its approval status.");
+        }
+
+        throw new ApiError(409, "An account with this email already exists. Please sign in.");
     }
 
     const user = await User.create({
