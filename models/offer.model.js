@@ -45,5 +45,7 @@ const offerSchema = new Schema(
 );
 
 offerSchema.index({ application: 1 }, { unique: true });
+offerSchema.index({ job: 1, status: 1, updatedAt: -1 });
+offerSchema.index({ company: 1, createdAt: -1 });
 
 export const Offer = mongoose.model("Offer", offerSchema);

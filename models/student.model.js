@@ -102,4 +102,6 @@ const studentSchema = new Schema(
   { timestamps: true }
 );
 
+studentSchema.index({ college: 1, branch: 1, batch: 1, placementStatus: 1 });
+
 export const Student = mongoose.model("Student", studentSchema);

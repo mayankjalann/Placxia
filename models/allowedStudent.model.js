@@ -36,6 +36,8 @@ const allowedStudentSchema = new Schema(
   { timestamps: true }
 );
 
+allowedStudentSchema.index({ college: 1, branch: 1, batch: 1, isRegistered: 1 });
+
 export const AllowedStudent = mongoose.model(
   "AllowedStudent",
   allowedStudentSchema

@@ -13,6 +13,13 @@ import { extname } from "node:path";
 import mongoose from "mongoose";
 import { uploadOnCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
 
+const getAuthCookieOptions = () => ({
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    path: "/",
+});
+
 const generateAccessAndRefreshTokens= async(userId)=>{
   try{
        const user= await User.findById(userId)
@@ -246,11 +253,7 @@ const loginUser= asyncHandler(async (req,res)=>{
          loggedInUser.name = admin.name;
      }
 
-     const options={
-          httpOnly: true,
-          secure: true,
-          sameSite: 'lax'
-     } //ensures cookies non modifiable by frontend
+     const options = getAuthCookieOptions();
 
      return res
      .status(200)
@@ -279,11 +282,7 @@ const logoutUser=asyncHandler(async (req,res)=>{
 );
 
 // 2. clear cookies
-const options = {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax'
-};
+const options = getAuthCookieOptions();
 
 return res
     .status(200)
@@ -318,8 +317,9 @@ const changePassword=asyncHandler(async(req,res)=>{
 
   await user.save({ validateBeforeSave: true }); //pre-save hook will hash it
 
-  res.clearCookie("accessToken");
-  res.clearCookie("refreshToken");
+  const cookieOptions = getAuthCookieOptions();
+  res.clearCookie("accessToken", cookieOptions);
+  res.clearCookie("refreshToken", cookieOptions);
 
   return res.status(200).json(
     new ApiResponse(200, {}, "Password changed successfully")
@@ -343,7 +343,11 @@ const updateStudentProfile = asyncHandler(async (req, res) => {
       }
 
       try {
-          student.resumeData = await readFile(req.file.path);
+          const resumeData = await readFile(req.file.path);
+          if (resumeData.subarray(0, 5).toString("ascii") !== "%PDF-") {
+              throw new ApiError(400, "The uploaded file is not a valid PDF");
+          }
+          student.resumeData = resumeData;
       } finally {
           await unlink(req.file.path).catch(() => {});
       }
@@ -404,9 +408,9 @@ const updateCompanyProfile = asyncHandler(async (req, res) => {
   let uploadedLogo;
   const oldLogoPublicId = company.logoPublicId;
   if (req.file) {
-      if (!req.file.mimetype.startsWith("image/")) {
+      if (!["image/jpeg", "image/png", "image/webp"].includes(req.file.mimetype)) {
           await unlink(req.file.path).catch(() => {});
-          throw new ApiError(400, "Company logo must be an image");
+          throw new ApiError(400, "Company logo must be a JPG, PNG, or WebP image");
       }
       const uploadResult = await uploadOnCloudinary(req.file.path);
       if (!uploadResult) {
@@ -550,11 +554,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
   const { accessToken, refreshToken: newRefreshToken } =
       await generateAccessAndRefreshTokens(user._id);
 
-  const options = {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'lax'
-  };
+  const options = getAuthCookieOptions();
 
   return res
       .status(200)

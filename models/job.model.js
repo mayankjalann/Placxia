@@ -90,4 +90,7 @@ const jobSchema = new Schema(
   { timestamps: true }
 );
 
+jobSchema.index({ eligibleColleges: 1, status: 1, deadline: 1 });
+jobSchema.index({ company: 1, createdAt: -1 });
+
 export const Job = mongoose.model("Job", jobSchema);

@@ -62,5 +62,8 @@ const applicationSchema = new Schema(
 
 // Prevent same student applying to same job twice
 applicationSchema.index({ student: 1, job: 1 }, { unique: true });
+applicationSchema.index({ job: 1, createdAt: -1 });
+applicationSchema.index({ job: 1, status: 1 });
+applicationSchema.index({ student: 1, createdAt: -1 });
 
 export const Application = mongoose.model("Application", applicationSchema);
