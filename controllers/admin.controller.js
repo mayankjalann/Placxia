@@ -91,7 +91,7 @@ const addAllowedStudent=asyncHandler(async(req,res)=>{
     }
 
     const existingStudent= await AllowedStudent.findOne({
-        $or: [{email: normalizedEmail},{rollNo: rollNo.trim()}]
+        $or: [{email: normalizedEmail},{college: admin.college, rollNo: rollNo.trim()}]
     });
 
     if(existingStudent){
@@ -133,7 +133,7 @@ const addAllowedStudentsBulk = asyncHandler(async (req, res) => {
     const existingRecords = validForLookup.length ? await AllowedStudent.find({
         $or: [
             { email: { $in: validForLookup.map((row) => row.email) } },
-            { rollNo: { $in: validForLookup.map((row) => row.rollNo) } },
+            { college: admin.college, rollNo: { $in: validForLookup.map((row) => row.rollNo) } },
         ],
     }).select("email rollNo").lean() : [];
     const existingEmails = new Set(existingRecords.map((record) => record.email));

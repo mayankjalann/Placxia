@@ -152,8 +152,13 @@ const updateApplicationStatus = asyncHandler(async (req, res) => {
     const { status } = req.body;
 
     // 1. Validate the incoming status
-    const allowedStatuses = ["SHORTLISTED", "SELECTED", "REJECTED"];
-    if (!allowedStatuses.includes(status)) {
+    const transitions = {
+        APPLIED: ["SHORTLISTED", "REJECTED"],
+        SHORTLISTED: ["SELECTED", "REJECTED"],
+        SELECTED: [],
+        REJECTED: [],
+    };
+    if (!Object.keys(transitions).includes(status)) {
         throw new ApiError(400, "Invalid status update");
     }
 
@@ -178,9 +183,16 @@ const updateApplicationStatus = asyncHandler(async (req, res) => {
         throw new ApiError(403, "You do not have permission to update this application");
     }
 
-    // 5. Update status and save
-    application.status = status;
-    await application.save();
+    // Use a conditional write so simultaneous requests cannot skip a stage.
+    if (!(transitions[application.status] || []).includes(status)) {
+        throw new ApiError(409, `Cannot move an application from ${application.status} to ${status}`);
+    }
+    const updatedApplication = await Application.findOneAndUpdate(
+        { _id: application._id, status: application.status },
+        { $set: { status } },
+        { new: true, runValidators: true }
+    );
+    if (!updatedApplication) throw new ApiError(409, "Application status changed. Refresh and try again.");
     const student = await Student.findById(application.student).select("user name");
     if (student?.user) {
         await notifyUser({
@@ -193,7 +205,7 @@ const updateApplicationStatus = asyncHandler(async (req, res) => {
     }
 
     return res.status(200).json(
-        new ApiResponse(200, application, `Application status updated to ${status}`)
+        new ApiResponse(200, updatedApplication, `Application status updated to ${status}`)
     );
 });
 

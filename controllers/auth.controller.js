@@ -12,6 +12,7 @@ import { readFile, unlink } from "node:fs/promises";
 import { extname } from "node:path";
 import mongoose from "mongoose";
 import { uploadOnCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
+import { randomUUID } from "node:crypto";
 
 const getAuthCookieOptions = () => ({
     httpOnly: true,
@@ -20,7 +21,12 @@ const getAuthCookieOptions = () => ({
     path: "/",
 });
 
-const generateAccessAndRefreshTokens= async(userId)=>{
+const getRoleCookieNames = (role) => {
+    const suffix = ["STUDENT", "ADMIN", "COMPANY"].includes(role) ? role.toLowerCase() : "legacy";
+    return { access: `accessToken_${suffix}`, refresh: `refreshToken_${suffix}` };
+};
+
+const generateAccessAndRefreshTokens= async(userId, role)=>{
   try{
        const user= await User.findById(userId)
        
@@ -28,11 +34,12 @@ const generateAccessAndRefreshTokens= async(userId)=>{
         throw new ApiError(404, "User not found");
       }
 
-       const accessToken=user.generateAccessToken();
+       const sessionId = randomUUID();
+       const accessToken=user.generateAccessToken(sessionId);
        const refreshToken=user.generateRefreshToken();
-       user.refreshToken=refreshToken
+       user.refreshSessions.push({ sessionId, role, refreshToken, createdAt: new Date(), lastUsedAt: new Date() });
        await user.save({validateBeforeSave: false});
-       return {accessToken,refreshToken};
+       return {accessToken,refreshToken,sessionId};
   }
   catch(error){
        throw new ApiError(500,"Something went wrong");
@@ -95,7 +102,7 @@ const registerStudent=asyncHandler(async(req,res)=>{
         allowedStudent.isRegistered = true;
         await allowedStudent.save();
 
-        const createdUser= await User.findById(user._id).select("-password -refreshToken");
+        const createdUser= await User.findById(user._id).select("-password -refreshSessions");
 
         return res
         .status(201)
@@ -193,7 +200,7 @@ const registerCompany = asyncHandler(async (req, res) => {
         throw error;
     }
 
-    const createdUser = await User.findById(user._id).select("-password -refreshToken");
+    const createdUser = await User.findById(user._id).select("-password -refreshSessions");
     return res.status(201).json(
         new ApiResponse(
             201,
@@ -226,9 +233,7 @@ const loginUser= asyncHandler(async (req,res)=>{
       throw new ApiError(401, "Invalid credentials");
     }
 
-    const {accessToken,refreshToken}=await generateAccessAndRefreshTokens(user._id);
-
-     let loggedInUser = await User.findById(user._id).select("-password -refreshToken").lean();
+     let loggedInUser = await User.findById(user._id).select("-password -refreshSessions").lean();
      
      // CHEAT CODE: Manually "populate" the profile based on the role so Redux has their name!
      if (loggedInUser.role === "STUDENT") {
@@ -253,12 +258,15 @@ const loginUser= asyncHandler(async (req,res)=>{
          loggedInUser.name = admin.name;
      }
 
+     const {accessToken,refreshToken}=await generateAccessAndRefreshTokens(user._id, user.role);
+
      const options = getAuthCookieOptions();
+     const cookieNames = getRoleCookieNames(user.role);
 
      return res
      .status(200)
-     .cookie("accessToken",accessToken,options)
-     .cookie("refreshToken",refreshToken,options)
+     .cookie(cookieNames.access,accessToken,options)
+     .cookie(cookieNames.refresh,refreshToken,options)
      .json(
           new ApiResponse(
                200,{
@@ -273,21 +281,17 @@ const loginUser= asyncHandler(async (req,res)=>{
 })
 
 const logoutUser=asyncHandler(async (req,res)=>{
-  await User.findByIdAndUpdate(
-    req.user._id,
-    {
-        $unset: { refreshToken: 1 }
-    },
-    { new: true }
-);
+  if (req.authSessionId) {
+      await User.updateOne({ _id: req.user._id }, { $pull: { refreshSessions: { sessionId: req.authSessionId } } });
+  }
 
-// 2. clear cookies
 const options = getAuthCookieOptions();
+const cookieNames = getRoleCookieNames(req.user.role);
 
 return res
     .status(200)
-    .clearCookie("accessToken", options)
-    .clearCookie("refreshToken", options)
+    .clearCookie(cookieNames.access, options)
+    .clearCookie(cookieNames.refresh, options)
     .json(
         new ApiResponse(200, {}, "Logged out successfully")
     );
@@ -313,13 +317,16 @@ const changePassword=asyncHandler(async(req,res)=>{
   }
 
   user.password=newPassword;
-  user.refreshToken=null;
+  user.refreshSessions = [];
 
   await user.save({ validateBeforeSave: true }); //pre-save hook will hash it
 
   const cookieOptions = getAuthCookieOptions();
-  res.clearCookie("accessToken", cookieOptions);
-  res.clearCookie("refreshToken", cookieOptions);
+  ["STUDENT", "ADMIN", "COMPANY"].forEach((role) => {
+    const cookieNames = getRoleCookieNames(role);
+    res.clearCookie(cookieNames.access, cookieOptions);
+    res.clearCookie(cookieNames.refresh, cookieOptions);
+  });
 
   return res.status(200).json(
     new ApiResponse(200, {}, "Password changed successfully")
@@ -489,7 +496,7 @@ const updateAdminProfile = asyncHandler(async (req, res) => {
 const getCurrentUser = asyncHandler(async (req, res) => {
 
   let user = await User.findById(req.user._id)
-      .select("-password -refreshToken").lean();
+      .select("-password -refreshSessions").lean();
 
   if (user.role === "STUDENT") {
       const student = await Student.findOne({ user: user._id }).lean();
@@ -519,10 +526,9 @@ const getCurrentUser = asyncHandler(async (req, res) => {
 });
 
 const refreshAccessToken = asyncHandler(async (req, res) => {
-
-  const incomingRefreshToken =
-      req.cookies?.refreshToken ||
-      req.body?.refreshToken;
+  const requestedRole = req.get("x-auth-role")?.toUpperCase();
+  const cookieNames = getRoleCookieNames(requestedRole);
+  const incomingRefreshToken = req.cookies?.[cookieNames.refresh] || req.body?.refreshToken;
 
   if (!incomingRefreshToken) {
       throw new ApiError(401, "Refresh token missing");
@@ -546,20 +552,27 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
   }
 
   // 🔐 security check: token must match DB token
-  if (user.refreshToken !== incomingRefreshToken) {
+  if (!user.isActive) throw new ApiError(403, "Account is disabled. Contact admin");
+  const session = user.refreshSessions.find((entry) => entry.refreshToken === incomingRefreshToken && entry.role === user.role);
+  if (!session || (requestedRole && requestedRole !== user.role)) {
       throw new ApiError(401, "Refresh token is expired or reused");
   }
 
-  // 🔄 generate new tokens
-  const { accessToken, refreshToken: newRefreshToken } =
-      await generateAccessAndRefreshTokens(user._id);
+  const accessToken = user.generateAccessToken(session.sessionId);
+  const newRefreshToken = user.generateRefreshToken();
+  const rotation = await User.updateOne(
+      { _id: user._id, refreshSessions: { $elemMatch: { sessionId: session.sessionId, refreshToken: incomingRefreshToken } } },
+      { $set: { "refreshSessions.$.refreshToken": newRefreshToken, "refreshSessions.$.lastUsedAt": new Date() } }
+  );
+  if (!rotation.modifiedCount) throw new ApiError(401, "Refresh token was already rotated");
 
   const options = getAuthCookieOptions();
 
+  const roleCookies = getRoleCookieNames(user.role);
   return res
       .status(200)
-      .cookie("accessToken", accessToken, options)
-      .cookie("refreshToken", newRefreshToken, options)
+      .cookie(roleCookies.access, accessToken, options)
+      .cookie(roleCookies.refresh, newRefreshToken, options)
       .json(
           new ApiResponse(
               200,

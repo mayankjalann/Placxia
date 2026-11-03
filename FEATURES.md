@@ -9,6 +9,10 @@ The app now supports saved jobs and eligibility filters, company applicant searc
 - Keep `MONGODB_URI`, `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, Cloudinary credentials, and SMTP credentials in Vercel environment settings. Never put them in client-side `VITE_*` variables or commit them.
 - After deploying schema/index changes, confirm the MongoDB indexes are built and review Vercel function logs for index or connection warnings.
 
+## Seed the NIT Warangal admin
+
+Run `npm run seed:nitw-admin` from the backend repo in an operator environment connected to the intended MongoDB database. Set `NITW_ADMIN_PASSWORD` to a new password of at least 12 characters. The script uses the confirmed admin email/name, the supplied NITW college ObjectId, and employee ID `NITW-CCPD-001` by default; override the employee ID with `NITW_ADMIN_EMPLOYEE_ID` if needed. Optional profile fields are `NITW_ADMIN_DESIGNATION` and `NITW_ADMIN_DEPARTMENT`. It verifies the configured college ID has code `NITW`, refuses to convert a non-admin account or attach an admin to a different college, and does not modify an already-existing NITW admin. Keep credentials outside Git and confirm the target database before running.
+
 ## Analytics definitions
 
 - **Authorized students** are allowlist entries; **registered students** have completed account creation. Branch rows include both, including branches that have authorized students but no registrations yet.

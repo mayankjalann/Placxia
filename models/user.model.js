@@ -26,9 +26,13 @@ const userSchema = new Schema(
         ref: "College",
         default: null,
       },
-      refreshToken: {
-        type: String,
-      },
+      refreshSessions: [{
+        sessionId: { type: String, required: true },
+        role: { type: String, enum: ["STUDENT", "ADMIN", "COMPANY"], required: true },
+        refreshToken: { type: String, required: true },
+        createdAt: { type: Date, default: Date.now },
+        lastUsedAt: { type: Date, default: Date.now },
+      }],
       isVerified: {
         type: Boolean,
         default: false,
@@ -50,12 +54,13 @@ const userSchema = new Schema(
     this.password=await bcrypt.hash(this.password,10);
   })
 
-  userSchema.methods.generateAccessToken = function () {
+  userSchema.methods.generateAccessToken = function (sessionId) {
     return jwt.sign(
       {
         _id: this._id,
         email: this.email,
         role: this.role,
+        sid: sessionId,
       },
       process.env.ACCESS_TOKEN_SECRET,
       { expiresIn: process.env.ACCESS_TOKEN_EXPIRY }

@@ -10,7 +10,6 @@ const allowedStudentSchema = new Schema(
     email: {
       type: String,
       required: true,
-      unique: true,
       lowercase: true,
       trim: true,
     },
@@ -37,6 +36,8 @@ const allowedStudentSchema = new Schema(
 );
 
 allowedStudentSchema.index({ college: 1, branch: 1, batch: 1, isRegistered: 1 });
+allowedStudentSchema.index({ email: 1 }, { unique: true });
+allowedStudentSchema.index({ college: 1, rollNo: 1 }, { unique: true });
 
 export const AllowedStudent = mongoose.model(
   "AllowedStudent",

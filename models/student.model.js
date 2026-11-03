@@ -103,5 +103,6 @@ const studentSchema = new Schema(
 );
 
 studentSchema.index({ college: 1, branch: 1, batch: 1, placementStatus: 1 });
+studentSchema.index({ college: 1, rollNo: 1 }, { unique: true });
 
 export const Student = mongoose.model("Student", studentSchema);

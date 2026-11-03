@@ -25,12 +25,13 @@ export const notifyUser = async ({ userId, type, title, message, link = "/dashbo
 
     const mailer = getTransporter();
     if (mailer && user?.email) {
-      await mailer.sendMail({
+      // Keep SMTP latency out of request latency; in-app notification is already persisted.
+      void mailer.sendMail({
         from: process.env.SMTP_FROM || process.env.SMTP_USER,
         to: user.email,
         subject: title,
         text: message,
-      });
+      }).catch((error) => console.error("Email notification delivery failed:", error.message));
     }
     return notification;
   } catch (error) {

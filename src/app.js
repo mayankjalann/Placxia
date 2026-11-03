@@ -71,7 +71,7 @@ app.use(cookieParser());
 app.use((req, res, next) => {
     if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return next();
     const originHeader = req.get("origin");
-    const hasCookieAuth = Boolean(req.cookies?.accessToken || req.cookies?.refreshToken);
+    const hasCookieAuth = Object.keys(req.cookies || {}).some((name) => /^(accessToken|refreshToken)(_|$)/.test(name));
     const origin = normalizeOrigin(originHeader || "");
     if ((originHeader && !allowedOrigins.has(origin)) || (hasCookieAuth && !originHeader)) {
         return res.status(403).json({ success: false, message: "Request origin is not allowed" });
