@@ -21,7 +21,9 @@ export const verifyJWT=asyncHandler(async(req,res,next)=>{
         throw new ApiError(401, error?.message || "Invalid access token");
     }
 
-    const user=await User.findById(decodedToken?._id).select("-password -refreshSessions");
+    // Keep sessions selected until they are checked, then strip them before
+    // exposing the user to route handlers.
+    const user=await User.findById(decodedToken?._id).select("-password");
     if(!user){
         throw new ApiError(401,"Invalid Access Token");
     }
@@ -31,7 +33,9 @@ export const verifyJWT=asyncHandler(async(req,res,next)=>{
         throw new ApiError(401, "Session has been revoked");
     }
 
-    req.user=user;
+    const safeUser = user.toObject();
+    delete safeUser.refreshSessions;
+    req.user=safeUser;
     req.authSessionId = decodedToken.sid;
     next();
 });
