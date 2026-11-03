@@ -211,30 +211,38 @@ const updateApplicationStatus = asyncHandler(async (req, res) => {
 
 const upsertInterviewRound = asyncHandler(async (req, res) => {
     const { applicationId } = req.params;
-    const { roundNo, roundType, scheduledAt, interviewerName, result, feedback } = req.body;
+    const { roundNo, roundType, scheduledAt, interviewerName, feedback } = req.body;
     const allowedTypes = ["APTITUDE", "TECHNICAL", "HR", "GD"];
-    const allowedResults = ["PASS", "FAIL", "PENDING"];
     if (!Number.isInteger(Number(roundNo)) || Number(roundNo) < 1 || !allowedTypes.includes(roundType)) {
         throw new ApiError(400, "Choose a valid round number and round type");
     }
-    if (result !== undefined && !allowedResults.includes(result)) throw new ApiError(400, "Invalid round result");
     if (scheduledAt && Number.isNaN(new Date(scheduledAt).getTime())) throw new ApiError(400, "Choose a valid interview date and time");
+    if (scheduledAt && new Date(scheduledAt) <= new Date()) throw new ApiError(400, "Interview time must be in the future");
 
     const company = await Company.findOne({ user: req.user._id });
     if (!company) throw new ApiError(404, "Company profile not found");
     const application = await Application.findById(applicationId).populate("job", "company title");
     if (!application?.job) throw new ApiError(404, "Application not found");
     if (application.job.company.toString() !== company._id.toString()) throw new ApiError(403, "You cannot manage interviews for this application");
-    if (application.status === "REJECTED") throw new ApiError(400, "Rejected applications cannot be scheduled for interview");
+    if (["REJECTED", "SELECTED"].includes(application.status)) throw new ApiError(400, "This application is no longer accepting interview rounds");
 
     const existingRound = application.rounds.find((round) => round.roundNo === Number(roundNo));
+    const nextRoundNo = application.rounds.reduce((highest, round) => Math.max(highest, round.roundNo), 0) + 1;
+    if (!existingRound && Number(roundNo) !== nextRoundNo) {
+        throw new ApiError(409, `Schedule Round ${nextRoundNo} next`);
+    }
+    if (existingRound && existingRound.result !== "PENDING") {
+        throw new ApiError(409, "A completed round cannot be rescheduled");
+    }
+    if (!existingRound && application.rounds.length && application.rounds.some((round) => round.result !== "PASS")) {
+        throw new ApiError(409, "The previous round must be passed before scheduling the next round");
+    }
     const oldSchedule = existingRound?.scheduledAt?.getTime();
     const roundData = {
         roundNo: Number(roundNo),
         roundType,
         ...(scheduledAt ? { scheduledAt: new Date(scheduledAt) } : {}),
         ...(interviewerName !== undefined ? { interviewerName: interviewerName.trim() } : {}),
-        ...(result !== undefined ? { result } : {}),
         ...(feedback !== undefined ? { feedback: feedback.trim() } : {}),
     };
     if (existingRound) Object.assign(existingRound, roundData);
@@ -256,6 +264,49 @@ const upsertInterviewRound = asyncHandler(async (req, res) => {
     }
 
     return res.status(200).json(new ApiResponse(200, application, "Interview round saved"));
+});
+
+const recordInterviewRoundResult = asyncHandler(async (req, res) => {
+    const roundNo = Number(req.params.roundNo);
+    const { result, feedback } = req.body;
+    if (!Number.isInteger(roundNo) || roundNo < 1 || !["PASS", "FAIL"].includes(result)) {
+        throw new ApiError(400, "Choose pass or reject for this interview round");
+    }
+    const company = await Company.findOne({ user: req.user._id });
+    if (!company) throw new ApiError(404, "Company profile not found");
+    const application = await Application.findById(req.params.applicationId).populate("job", "company title");
+    if (!application?.job) throw new ApiError(404, "Application not found");
+    if (application.job.company.toString() !== company._id.toString()) {
+        throw new ApiError(403, "You cannot manage interviews for this application");
+    }
+    if (["REJECTED", "SELECTED"].includes(application.status)) {
+        throw new ApiError(409, "This application is already closed in the hiring pipeline");
+    }
+    const round = application.rounds.find((entry) => entry.roundNo === roundNo);
+    if (!round) throw new ApiError(404, "Interview round not found");
+    if (!round.scheduledAt) throw new ApiError(409, "Schedule this round before recording its result");
+    if (round.result !== "PENDING") throw new ApiError(409, "This round already has a result");
+
+    round.result = result;
+    if (feedback !== undefined) round.feedback = feedback.trim();
+    if (result === "FAIL") application.status = "REJECTED";
+    else if (application.status === "APPLIED") application.status = "SHORTLISTED";
+    await application.save();
+
+    const student = await Student.findById(application.student).select("user");
+    if (student?.user) {
+        const passed = result === "PASS";
+        await notifyUser({
+            userId: student.user,
+            type: "APPLICATION_STATUS",
+            title: passed ? `Round ${roundNo} passed` : "Application update",
+            message: passed
+                ? `You passed Round ${roundNo} for ${application.job.title}. The company may schedule the next round.`
+                : `Your application for ${application.job.title} did not progress after Round ${roundNo}.`,
+            link: "/dashboard",
+        });
+    }
+    return res.status(200).json(new ApiResponse(200, application, result === "PASS" ? "Round passed" : "Application rejected"));
 });
 
 const getMyApplications = asyncHandler(async (req, res) => {
@@ -286,6 +337,7 @@ export {
     getApplicantResume,
     updateApplicationStatus,
     upsertInterviewRound,
+    recordInterviewRoundResult,
     getMyApplications
 }
 
