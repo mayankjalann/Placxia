@@ -8,6 +8,7 @@ import { Company } from "../models/company.model.js";
 import mongoose from "mongoose";
 import { notifyUser } from "../utils/notifications.js";
 import { getStudentJobEligibilityReason } from "../utils/jobEligibility.js";
+import { Offer } from "../models/offer.model.js";
 
 const applyForJob=asyncHandler(async (req,res)=>{
     const {jobId}=req.params;
@@ -32,6 +33,11 @@ const applyForJob=asyncHandler(async (req,res)=>{
 
     const eligibilityReason = getStudentJobEligibilityReason(job, student);
     if (eligibilityReason) throw new ApiError(403, eligibilityReason);
+
+    const acceptedOffers = await Offer.countDocuments({ job: job._id, status: "ACCEPTED" });
+    if (acceptedOffers >= job.positionsAvailable) {
+        throw new ApiError(409, "All positions for this job have been filled");
+    }
 
     const existingApplication= await Application.findOne({
         student: student._id,
@@ -216,8 +222,8 @@ const upsertInterviewRound = asyncHandler(async (req, res) => {
     if (!Number.isInteger(Number(roundNo)) || Number(roundNo) < 1 || !allowedTypes.includes(roundType)) {
         throw new ApiError(400, "Choose a valid round number and round type");
     }
-    if (scheduledAt && Number.isNaN(new Date(scheduledAt).getTime())) throw new ApiError(400, "Choose a valid interview date and time");
-    if (scheduledAt && new Date(scheduledAt) <= new Date()) throw new ApiError(400, "Interview time must be in the future");
+    if (!scheduledAt || Number.isNaN(new Date(scheduledAt).getTime())) throw new ApiError(400, "Choose a valid interview date and time");
+    if (new Date(scheduledAt) <= new Date()) throw new ApiError(400, "Interview time must be in the future");
 
     const company = await Company.findOne({ user: req.user._id });
     if (!company) throw new ApiError(404, "Company profile not found");

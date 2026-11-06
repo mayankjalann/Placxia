@@ -32,8 +32,12 @@ const validateEligibilityFields = (fields) => {
             throw new ApiError(400, `${field} must be between ${min} and ${max}`);
         }
     }
-    const allowedBranches = ["CSE", "IT", "ECE", "EE", "ME", "CE", "OTHER"];
-    if (fields.allowedBranches !== undefined && (!Array.isArray(fields.allowedBranches) || fields.allowedBranches.some((branch) => !allowedBranches.includes(branch)))) {
+    const branchOptions = ["CSE", "IT", "ECE", "EE", "ME", "CE", "OTHER"];
+    if (fields.allowedBranches !== undefined && (
+        !Array.isArray(fields.allowedBranches) ||
+        fields.allowedBranches.some((branch) => typeof branch !== "string" || !branchOptions.includes(branch)) ||
+        new Set(fields.allowedBranches).size !== fields.allowedBranches.length
+    )) {
         throw new ApiError(400, "Select valid branch codes for eligibility");
     }
 };
@@ -317,12 +321,24 @@ const getAllOpenJobs= asyncHandler(async(req,res)=>{
     .populate("company","name industry logoUrl")
     .sort({createdAt: -1}); //descending order
 
+    const acceptedOfferCounts = openJobs.length
+        ? await Offer.aggregate([
+            { $match: { job: { $in: openJobs.map((job) => job._id) }, status: "ACCEPTED" } },
+            { $group: { _id: "$job", accepted: { $sum: 1 } } },
+        ])
+        : [];
+    const acceptedByJob = new Map(acceptedOfferCounts.map((entry) => [entry._id.toString(), entry.accepted]));
+    const jobsWithAvailability = openJobs.map((job) => ({
+        ...job.toObject(),
+        remainingPositions: Math.max(0, job.positionsAvailable - (acceptedByJob.get(job._id.toString()) || 0)),
+    }));
+
     let visibleJobs = req.user.role === "STUDENT"
-        ? openJobs.map((job) => ({
-            ...job.toObject(),
+        ? jobsWithAvailability.map((job) => ({
+            ...job,
             eligibilityReason: getStudentJobEligibilityReason(job, student),
         }))
-        : openJobs;
+        : jobsWithAvailability;
     return res.status(200).json(
         new ApiResponse(200, visibleJobs, "Open jobs fetched successfully")
     );
@@ -340,6 +356,7 @@ const getJobById = asyncHandler(async (req, res) => {
     }
 
     let eligibilityReason = null;
+    let remainingPositions = null;
     if (req.user.role === "STUDENT") {
         const student = await Student.findOne({ user: req.user._id });
         if (!student) {
@@ -349,10 +366,18 @@ const getJobById = asyncHandler(async (req, res) => {
             throw new ApiError(404, "Job not found");
         }
         eligibilityReason = getStudentJobEligibilityReason(job, student);
+        const acceptedOffers = await Offer.countDocuments({ job: job._id, status: "ACCEPTED" });
+        remainingPositions = Math.max(0, job.positionsAvailable - acceptedOffers);
     }
 
+    const jobDetails = {
+        ...job.toObject(),
+        ...(eligibilityReason ? { eligibilityReason } : {}),
+        ...(remainingPositions !== null ? { remainingPositions } : {}),
+    };
+
     return res.status(200).json(
-        new ApiResponse(200, eligibilityReason ? { ...job.toObject(), eligibilityReason } : job, "Job details fetched successfully")
+        new ApiResponse(200, jobDetails, "Job details fetched successfully")
     );
 });
 

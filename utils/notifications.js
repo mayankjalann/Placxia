@@ -18,20 +18,19 @@ const getTransporter = () => {
 
 export const notifyUser = async ({ userId, type, title, message, link = "/dashboard" }) => {
   try {
-    const [notification, user] = await Promise.all([
-      Notification.create({ recipient: userId, type, title, message, link }),
-      User.findById(userId).select("email"),
-    ]);
-
+    const notification = await Notification.create({ recipient: userId, type, title, message, link });
     const mailer = getTransporter();
-    if (mailer && user?.email) {
-      // Keep SMTP latency out of request latency; in-app notification is already persisted.
-      void mailer.sendMail({
-        from: process.env.SMTP_FROM || process.env.SMTP_USER,
-        to: user.email,
-        subject: title,
-        text: message,
-      }).catch((error) => console.error("Email notification delivery failed:", error.message));
+    if (mailer) {
+      // Resolve the email recipient and send mail in the background. The in-app
+      // notification is persisted before this function returns to the API.
+      void User.findById(userId).select("email").lean()
+        .then((user) => user?.email ? mailer.sendMail({
+          from: process.env.SMTP_FROM || process.env.SMTP_USER,
+          to: user.email,
+          subject: title,
+          text: message,
+        }) : null)
+        .catch((error) => console.error("Email notification delivery failed:", error.message));
     }
     return notification;
   } catch (error) {

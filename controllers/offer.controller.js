@@ -6,6 +6,7 @@ import { Company } from "../models/company.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { Student } from "../models/student.model.js";
 import { notifyUser } from "../utils/notifications.js";
+import { Job } from "../models/job.model.js";
 
 const createOffer=asyncHandler(async (req,res)=>{
     const {applicationId}=req.params;
@@ -103,6 +104,15 @@ const respondToOffer= asyncHandler(async(req,res)=>{
 
     if (offer.status !== "PENDING") {
         throw new ApiError(400, `You have already ${offer.status.toLowerCase()} this offer`);
+    }
+
+    if (status === "ACCEPTED") {
+        const job = await Job.findById(offer.job).select("positionsAvailable").lean();
+        if (!job) throw new ApiError(404, "Job not found");
+        const acceptedOffers = await Offer.countDocuments({ job: offer.job, status: "ACCEPTED" });
+        if (acceptedOffers >= job.positionsAvailable) {
+            throw new ApiError(409, "All positions for this job have already been filled");
+        }
     }
 
     offer.status=status;
