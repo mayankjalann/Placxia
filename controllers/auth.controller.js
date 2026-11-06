@@ -527,23 +527,31 @@ const getCurrentUser = asyncHandler(async (req, res) => {
 
 const refreshAccessToken = asyncHandler(async (req, res) => {
   const requestedRole = req.get("x-auth-role")?.toUpperCase();
-  const cookieNames = getRoleCookieNames(requestedRole);
-  const incomingRefreshToken = req.cookies?.[cookieNames.refresh] || req.body?.refreshToken;
+  const roleSuffixes = { STUDENT: "student", ADMIN: "admin", COMPANY: "company" };
+  const refreshCandidates = req.body?.refreshToken
+      ? [req.body.refreshToken]
+      : requestedRole && roleSuffixes[requestedRole]
+          ? [req.cookies?.[`refreshToken_${roleSuffixes[requestedRole]}`]]
+          : Object.values(roleSuffixes).map((suffix) => req.cookies?.[`refreshToken_${suffix}`]);
+  const availableRefreshTokens = refreshCandidates.filter(Boolean);
 
-  if (!incomingRefreshToken) {
+  if (!availableRefreshTokens.length) {
       throw new ApiError(401, "Refresh token missing");
   }
 
-  let decodedToken;
-
-  try {
-      decodedToken = jwt.verify(
-          incomingRefreshToken,
-          process.env.REFRESH_TOKEN_SECRET
-      );
-  } catch (error) {
-      throw new ApiError(401, "Invalid or expired refresh token");
-  }
+  const validRefreshTokens = availableRefreshTokens
+      .map((token) => {
+          try {
+              return { token, decoded: jwt.verify(token, process.env.REFRESH_TOKEN_SECRET) };
+          } catch {
+              return null;
+          }
+      })
+      .filter(Boolean)
+      .sort((left, right) => (right.decoded.iat || 0) - (left.decoded.iat || 0));
+  const selectedRefresh = validRefreshTokens[0];
+  if (!selectedRefresh) throw new ApiError(401, "Invalid or expired refresh token");
+  const { token: incomingRefreshToken, decoded: decodedToken } = selectedRefresh;
 
   const user = await User.findById(decodedToken._id);
 
@@ -576,7 +584,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
       .json(
           new ApiResponse(
               200,
-              {},
+              { role: user.role },
               "Access token refreshed successfully"
           )
       );
